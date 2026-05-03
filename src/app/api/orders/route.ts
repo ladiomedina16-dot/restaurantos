@@ -1,10 +1,19 @@
+// ============================================================
+// /api/orders — Order management
+// GET  /api/orders       → List orders (requires orders:read)
+// POST /api/orders       → Create order (requires orders:create)
+// ============================================================
+
 import { db } from '@/lib/db'
 import { NextResponse } from 'next/server'
+import { authenticateAndAuthorize } from '@/lib/auth'
+import { emitOrderCreated } from '@/lib/realtime'
 
 interface OrderItemInput {
   productId: string
   quantity: number
   notes?: string
+  modifiers?: string[] // e.g. ["sin hielo", "poco hecho"]
 }
 
 interface CreateOrderInput {
@@ -14,7 +23,12 @@ interface CreateOrderInput {
   items: OrderItemInput[]
 }
 
+// ─── GET /api/orders ────────────────────────────────────────
+
 export async function GET(request: Request) {
+  const auth = authenticateAndAuthorize(request, 'orders:read')
+  if ('error' in auth) return auth.error
+
   try {
     const { searchParams } = new URL(request.url)
     const status = searchParams.get('status')
@@ -50,6 +64,12 @@ export async function GET(request: Request) {
             product: true,
           },
         },
+        createdBy: {
+          select: { id: true, username: true, name: true, role: true },
+        },
+        finishedBy: {
+          select: { id: true, username: true, name: true, role: true },
+        },
       },
       orderBy: { createdAt: 'desc' },
     })
@@ -64,7 +84,13 @@ export async function GET(request: Request) {
   }
 }
 
+// ─── POST /api/orders ───────────────────────────────────────
+
 export async function POST(request: Request) {
+  const auth = authenticateAndAuthorize(request, 'orders:create')
+  if ('error' in auth) return auth.error
+  const { user } = auth
+
   try {
     const body = await request.json()
     const { tableId, clientId, notes, items } = body as CreateOrderInput
@@ -103,7 +129,7 @@ export async function POST(request: Request) {
       }
     }
 
-    // Fetch all products in the order
+    // Fetch all products in the order (prices from DB only)
     const productIds = items.map((item) => item.productId)
     const products = await db.product.findMany({
       where: { id: { in: productIds } },
@@ -133,7 +159,7 @@ export async function POST(request: Request) {
       }
     }
 
-    // Calculate subtotals and subtotal (before discount)
+    // Calculate subtotals from DB prices only, include modifiers
     const orderItemsData = items.map((item) => {
       const product = productMap.get(item.productId)!
       const unitPrice = product.price
@@ -144,6 +170,7 @@ export async function POST(request: Request) {
         unitPrice,
         subtotal,
         notes: item.notes ?? '',
+        modifiers: item.modifiers ? JSON.stringify(item.modifiers) : '',
       }
     })
 
@@ -161,6 +188,7 @@ export async function POST(request: Request) {
           discount: 0,
           total: subtotal,
           status: 'pending',
+          createdById: user.userId,
           items: {
             create: orderItemsData,
           },
@@ -173,6 +201,9 @@ export async function POST(request: Request) {
           },
           table: true,
           client: true,
+          createdBy: {
+            select: { id: true, username: true, name: true, role: true },
+          },
         },
       })
 
@@ -203,6 +234,9 @@ export async function POST(request: Request) {
 
       return newOrder
     })
+
+    // Emit real-time event after successful order creation
+    await emitOrderCreated(order)
 
     return NextResponse.json({ order }, { status: 201 })
   } catch (error) {

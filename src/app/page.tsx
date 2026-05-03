@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useCallback, useRef } from 'react'
+import { useEffect, useState, useCallback, createContext, useContext } from 'react'
 import {
   LayoutDashboard,
   Package,
@@ -39,6 +39,7 @@ import {
   CircleDot,
   CheckCheck,
   X,
+  LogOut,
 } from 'lucide-react'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { Button } from '@/components/ui/button'
@@ -57,7 +58,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useRestaurantStore, type TabId } from '@/lib/store'
-import { getSocket, disconnectSocket } from '@/lib/socket'
+import { getSocket } from '@/lib/socket'
 import { toast } from 'sonner'
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -117,6 +118,7 @@ interface OrderItemDetail {
   unitPrice: number
   subtotal: number
   notes: string
+  modifiers: string
   product: { id: string; name: string; price: number; category: string }
 }
 
@@ -129,6 +131,8 @@ interface Order {
   subtotal?: number
   discount?: number
   notes: string
+  createdById?: string | null
+  finishedById?: string | null
   createdAt: string
   updatedAt: string
   table: { id: string; number: number; zone: string }
@@ -174,6 +178,24 @@ const zoneOrder = ['bar', 'main', 'terrace', 'private']
 
 const categoryOrder = ['bebida', 'tapa_fria', 'tapa_caliente', 'montadito', 'racion', 'postre', 'comida', 'general']
 
+// ─── Auth Context ────────────────────────────────────────────────────────────
+
+interface AuthContextType {
+  authToken: string | null
+  currentUser: { userId: string; username: string; role: string; name: string } | null
+  authHeaders: (contentType?: boolean) => Record<string, string>
+  handleFetchResponse: (res: Response) => boolean
+  logout: () => void
+}
+
+const AuthContext = createContext<AuthContextType | null>(null)
+
+function useAuth() {
+  const ctx = useContext(AuthContext)
+  if (!ctx) throw new Error('useAuth must be used within AuthProvider')
+  return ctx
+}
+
 // ─── CAMARERO TAB ───────────────────────────────────────────────────────────
 
 function CamareroTab() {
@@ -185,6 +207,7 @@ function CamareroTab() {
     clearOrderItems,
     resetOrder,
   } = useRestaurantStore()
+  const { authHeaders, handleFetchResponse } = useAuth()
 
   const [tables, setTables] = useState<TableItem[]>([])
   const [products, setProducts] = useState<Product[]>([])
@@ -203,34 +226,34 @@ function CamareroTab() {
 
   const fetchTables = useCallback(async () => {
     try {
-      const res = await fetch('/api/tables')
-      if (res.ok) {
+      const res = await fetch('/api/tables', { headers: authHeaders(false) })
+      if (handleFetchResponse(res) && res.ok) {
         const json = await res.json()
         setTables(json.tables.filter((t: TableItem) => t.active))
       }
     } catch { /* silently fail */ }
-  }, [])
+  }, [authHeaders, handleFetchResponse])
 
   const fetchProducts = useCallback(async () => {
     try {
-      const res = await fetch('/api/products')
-      if (res.ok) {
+      const res = await fetch('/api/products', { headers: authHeaders(false) })
+      if (handleFetchResponse(res) && res.ok) {
         const json = await res.json()
         setProducts(json.products.filter((p: Product) => p.active))
       }
     } catch { /* silently fail */ }
-  }, [])
+  }, [authHeaders, handleFetchResponse])
 
   const searchClients = useCallback(async (q: string) => {
     if (!q.trim()) { setClients([]); return }
     try {
-      const res = await fetch(`/api/clients?search=${encodeURIComponent(q)}`)
-      if (res.ok) {
+      const res = await fetch(`/api/clients?search=${encodeURIComponent(q)}`, { headers: authHeaders(false) })
+      if (handleFetchResponse(res) && res.ok) {
         const json = await res.json()
         setClients(json.clients)
       }
     } catch { /* silently fail */ }
-  }, [])
+  }, [authHeaders, handleFetchResponse])
 
   useEffect(() => {
     const load = async () => {
@@ -290,19 +313,13 @@ function CamareroTab() {
 
       const res = await fetch('/api/orders', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: authHeaders(),
         body: JSON.stringify(body),
       })
 
-      if (res.ok) {
+      if (handleFetchResponse(res) && res.ok) {
         const json = await res.json()
         toast.success('Pedido enviado a cocina')
-        const socket = getSocket()
-        socket.emit('order-created', {
-          type: 'created',
-          order: json.order,
-          timestamp: new Date().toISOString(),
-        })
         resetOrder()
         setSelectedClientId('')
         setClientSearch('')
@@ -620,18 +637,19 @@ function CocinaTab() {
   const [loading, setLoading] = useState(true)
   const [finishing, setFinishing] = useState<string | null>(null)
   const [now, setNow] = useState(Date.now())
+  const { authHeaders, handleFetchResponse } = useAuth()
 
   const fetchOrders = useCallback(async () => {
     try {
-      const res = await fetch('/api/orders?status=pending,in_progress')
-      if (res.ok) {
+      const res = await fetch('/api/orders?status=pending,in_progress', { headers: authHeaders(false) })
+      if (handleFetchResponse(res) && res.ok) {
         const json = await res.json()
         setOrders(json.orders)
       }
     } catch { /* silently fail */ } finally {
       setLoading(false)
     }
-  }, [])
+  }, [authHeaders, handleFetchResponse])
 
   useEffect(() => {
     fetchOrders()
@@ -648,7 +666,6 @@ function CocinaTab() {
   // Socket listeners
   useEffect(() => {
     const socket = getSocket()
-    socket.emit('join-room', 'kitchen')
 
     const onOrderCreated = (data: { order: Order }) => {
       setOrders((prev) => {
@@ -686,29 +703,22 @@ function CocinaTab() {
     try {
       // First set to in_progress if pending
       if (order.status === 'pending') {
-        await fetch(`/api/orders/${order.id}`, {
+        const preRes = await fetch(`/api/orders/${order.id}`, {
           method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
+          headers: authHeaders(),
           body: JSON.stringify({ status: 'in_progress' }),
         })
+        handleFetchResponse(preRes)
       }
 
       const res = await fetch(`/api/orders/${order.id}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: authHeaders(),
         body: JSON.stringify({ status: 'ready' }),
       })
 
-      if (res.ok) {
-        const json = await res.json()
+      if (handleFetchResponse(res) && res.ok) {
         toast.success(`Mesa ${order.table?.number ?? '?'} — Pedido listo`)
-        const socket = getSocket()
-        socket.emit('order-ready', {
-          type: 'ready',
-          order: json.order,
-          tableId: order.tableId,
-          timestamp: new Date().toISOString(),
-        })
         setOrders((prev) => prev.filter((o) => o.id !== order.id))
       } else {
         const err = await res.json()
@@ -812,6 +822,11 @@ function CocinaTab() {
                     {item.notes && (
                       <span className="text-xs text-amber-400 ml-1">({item.notes})</span>
                     )}
+                    {item.modifiers && item.modifiers !== '[]' && item.modifiers !== '' && (
+                      <span className="text-xs text-red-400 ml-1">
+                        ({JSON.parse(item.modifiers).join(', ')})
+                      </span>
+                    )}
                   </div>
                 ))}
               </div>
@@ -850,28 +865,30 @@ function CajaTab() {
   const [payingTable, setPayingTable] = useState<string | null>(null)
   const [paying, setPaying] = useState(false)
   const [now, setNow] = useState(Date.now())
+  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<'efectivo' | 'tarjeta'>('efectivo')
+  const { authHeaders, handleFetchResponse } = useAuth()
 
   const fetchTables = useCallback(async () => {
     try {
-      const res = await fetch('/api/tables')
-      if (res.ok) {
+      const res = await fetch('/api/tables', { headers: authHeaders(false) })
+      if (handleFetchResponse(res) && res.ok) {
         const json = await res.json()
         setTables(json.tables.filter((t: TableItem) => t.active))
       }
     } catch { /* silently fail */ }
-  }, [])
+  }, [authHeaders, handleFetchResponse])
 
   const fetchActiveOrders = useCallback(async () => {
     try {
-      const res = await fetch('/api/orders?status=pending,in_progress,ready,served')
-      if (res.ok) {
+      const res = await fetch('/api/orders?status=pending,in_progress,ready,served', { headers: authHeaders(false) })
+      if (handleFetchResponse(res) && res.ok) {
         const json = await res.json()
         setOrders(json.orders)
       }
     } catch { /* silently fail */ } finally {
       setLoading(false)
     }
-  }, [])
+  }, [authHeaders, handleFetchResponse])
 
   useEffect(() => {
     const load = async () => {
@@ -892,7 +909,6 @@ function CajaTab() {
   // Socket listeners
   useEffect(() => {
     const socket = getSocket()
-    socket.emit('join-room', 'caja')
 
     const refresh = () => { fetchTables(); fetchActiveOrders() }
     socket.on('order-created', refresh)
@@ -949,10 +965,10 @@ function CajaTab() {
       for (const order of selectedOrders) {
         const res = await fetch(`/api/orders/${order.id}/pay`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ applyDiscount: true }),
+          headers: authHeaders(),
+          body: JSON.stringify({ applyDiscount: true, paymentMethod: selectedPaymentMethod }),
         })
-        if (!res.ok) {
+        if (!handleFetchResponse(res) || !res.ok) {
           const err = await res.json()
           toast.error(err.error || 'Error al cobrar pedido')
           setPaying(false)
@@ -960,12 +976,6 @@ function CajaTab() {
         }
       }
       toast.success(`Mesa ${selectedTable?.number ?? '?'} cobrada — ${formatEUR(total)}`)
-      const socket = getSocket()
-      socket.emit('table-cleared', {
-        tableId: selectedTableId,
-        tableNumber: selectedTable?.number,
-        timestamp: new Date().toISOString(),
-      })
       setPayingTable(null)
       fetchTables()
       fetchActiveOrders()
@@ -1133,6 +1143,25 @@ function CajaTab() {
                 )}
               </div>
 
+              <div className="flex gap-2">
+                <Button
+                  variant={selectedPaymentMethod === 'efectivo' ? 'default' : 'outline'}
+                  className={`flex-1 h-12 ${selectedPaymentMethod === 'efectivo' ? 'bg-green-600 hover:bg-green-700 text-white' : ''}`}
+                  onClick={() => setSelectedPaymentMethod('efectivo')}
+                >
+                  <Euro className="size-5 mr-2" />
+                  Efectivo
+                </Button>
+                <Button
+                  variant={selectedPaymentMethod === 'tarjeta' ? 'default' : 'outline'}
+                  className={`flex-1 h-12 ${selectedPaymentMethod === 'tarjeta' ? 'bg-blue-600 hover:bg-blue-700 text-white' : ''}`}
+                  onClick={() => setSelectedPaymentMethod('tarjeta')}
+                >
+                  <CreditCard className="size-5 mr-2" />
+                  Tarjeta
+                </Button>
+              </div>
+
               <Button
                 className="w-full h-16 text-xl font-bold bg-green-600 hover:bg-green-700 text-white"
                 onClick={handleCobrar}
@@ -1244,27 +1273,109 @@ function AdminStub({ title, icon }: { title: string; icon: React.ReactNode }) {
 export default function RestaurantPage() {
   const { activeTab, setActiveTab, realtimeConnected, setRealtimeConnected } = useRestaurantStore()
 
-  // Socket connection
+  // ─── Auth State ────────────────────────────────────────────────
+  const [authToken, setAuthToken] = useState<string | null>(null)
+  const [currentUser, setCurrentUser] = useState<{ userId: string; username: string; role: string; name: string } | null>(null)
+  const [loginUsername, setLoginUsername] = useState('')
+  const [loginPassword, setLoginPassword] = useState('')
+  const [loginError, setLoginError] = useState('')
+  const [loginLoading, setLoginLoading] = useState(false)
+
+  // Load auth from localStorage on mount
   useEffect(() => {
+    const saved = localStorage.getItem('restaurantos_auth')
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved)
+        setAuthToken(parsed.token)
+        setCurrentUser(parsed.user)
+      } catch { /* ignore */ }
+    }
+  }, [])
+
+  const authHeaders = useCallback((contentType = true) => {
+    const headers: Record<string, string> = {}
+    if (contentType) headers['Content-Type'] = 'application/json'
+    if (authToken) headers['Authorization'] = `Bearer ${authToken}`
+    return headers
+  }, [authToken])
+
+  const handleFetchResponse = useCallback((res: Response) => {
+    if (res.status === 401) {
+      setAuthToken(null)
+      setCurrentUser(null)
+      localStorage.removeItem('restaurantos_auth')
+      toast.error('Sesión expirada')
+      return false
+    }
+    return true
+  }, [])
+
+  const logout = useCallback(() => {
+    setAuthToken(null)
+    setCurrentUser(null)
+    localStorage.removeItem('restaurantos_auth')
+  }, [])
+
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setLoginError('')
+    setLoginLoading(true)
+    try {
+      const res = await fetch('/api/auth', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: loginUsername, password: loginPassword }),
+      })
+      const data = await res.json()
+      if (res.ok) {
+        const userData = { userId: data.user.id, username: data.user.username, name: data.user.name, role: data.user.role }
+        setAuthToken(data.token)
+        setCurrentUser(userData)
+        localStorage.setItem('restaurantos_auth', JSON.stringify({ token: data.token, user: userData }))
+        setLoginUsername('')
+        setLoginPassword('')
+      } else {
+        setLoginError(data.error || 'Error al iniciar sesión')
+      }
+    } catch {
+      setLoginError('Error de red')
+    } finally {
+      setLoginLoading(false)
+    }
+  }
+
+  // Socket connection + role-based room join
+  useEffect(() => {
+    if (!authToken) return
     const socket = getSocket()
 
-    socket.on('connect', () => {
+    const onConnect = () => {
       setRealtimeConnected(true)
-    })
+      if (currentUser?.role === 'cocina') {
+        socket.emit('join-room', 'kitchen')
+      } else if (currentUser?.role === 'caja') {
+        socket.emit('join-room', 'caja')
+      } else {
+        // admin, super_admin, encargado, camarero join admin room
+        socket.emit('join-room', 'admin')
+      }
+    }
 
+    socket.on('connect', onConnect)
     socket.on('disconnect', () => {
       setRealtimeConnected(false)
     })
 
     // If already connected
     if (socket.connected) {
-      setRealtimeConnected(true)
+      onConnect()
     }
 
     return () => {
-      disconnectSocket()
+      socket.off('connect', onConnect)
     }
-  }, [setRealtimeConnected])
+  }, [authToken, currentUser, setRealtimeConnected])
 
   const mainTabs = [
     { id: 'camarero' as TabId, label: 'Camarero', icon: <Utensils className="size-4" /> },
@@ -1280,98 +1391,166 @@ export default function RestaurantPage() {
     { id: 'clients' as TabId, label: 'Clientes', icon: <Users className="size-4" /> },
   ]
 
+  // ─── Login Screen ──────────────────────────────────────────────
+  if (!authToken) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-amber-50 to-orange-50 p-4">
+        <Card className="w-full max-w-sm rounded-2xl shadow-xl">
+          <CardHeader className="text-center pb-2">
+            <div className="mx-auto flex size-16 items-center justify-center rounded-full bg-amber-100 mb-3">
+              <Flame className="size-8 text-amber-600" />
+            </div>
+            <CardTitle className="text-2xl font-bold text-amber-800">RestaurantOS</CardTitle>
+            <p className="text-sm text-muted-foreground mt-1">Inicia sesión para continuar</p>
+          </CardHeader>
+          <CardContent>
+            <form onSubmit={handleLogin} className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="username">Usuario</Label>
+                <Input
+                  id="username"
+                  type="text"
+                  placeholder="usuario"
+                  value={loginUsername}
+                  onChange={(e) => setLoginUsername(e.target.value)}
+                  className="h-12"
+                  required
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="password">Contraseña</Label>
+                <Input
+                  id="password"
+                  type="password"
+                  placeholder="••••••"
+                  value={loginPassword}
+                  onChange={(e) => setLoginPassword(e.target.value)}
+                  className="h-12"
+                  required
+                />
+              </div>
+              {loginError && (
+                <p className="text-sm text-red-600 text-center">{loginError}</p>
+              )}
+              <Button
+                type="submit"
+                className="w-full h-12 bg-amber-600 hover:bg-amber-700 text-white text-base font-semibold"
+                disabled={loginLoading}
+              >
+                {loginLoading ? 'Entrando...' : 'Entrar'}
+              </Button>
+            </form>
+          </CardContent>
+        </Card>
+      </div>
+    )
+  }
+
+  // ─── Authenticated App ─────────────────────────────────────────
   return (
-    <div className="min-h-screen flex flex-col bg-background">
-      {/* Top bar */}
-      <header className="border-b bg-white sticky top-0 z-50">
-        <div className="max-w-[1400px] mx-auto flex items-center justify-between px-4 py-2">
-          <div className="flex items-center gap-2">
-            <Flame className="size-6 text-amber-600" />
-            <span className="font-bold text-lg hidden sm:inline">RestaurantOS</span>
+    <AuthContext.Provider value={{ authToken, currentUser, authHeaders, handleFetchResponse, logout }}>
+      <div className="min-h-screen flex flex-col bg-background">
+        {/* Top bar */}
+        <header className="border-b bg-white sticky top-0 z-50">
+          <div className="max-w-[1400px] mx-auto flex items-center justify-between px-4 py-2">
+            <div className="flex items-center gap-2">
+              <Flame className="size-6 text-amber-600" />
+              <span className="font-bold text-lg hidden sm:inline">RestaurantOS</span>
+            </div>
+            <div className="flex items-center gap-2">
+              {realtimeConnected ? (
+                <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200 text-xs">
+                  <Wifi className="size-3 mr-1" /> Online
+                </Badge>
+              ) : (
+                <Badge variant="outline" className="bg-red-50 text-red-700 border-red-200 text-xs">
+                  <WifiOff className="size-3 mr-1" /> Offline
+                </Badge>
+              )}
+              {currentUser && (
+                <Badge variant="outline" className="bg-amber-50 text-amber-800 border-amber-200 text-xs">
+                  <UserCircle className="size-3 mr-1" />
+                  {currentUser.name} · {currentUser.role}
+                </Badge>
+              )}
+              <Button variant="ghost" size="sm" className="h-8 text-muted-foreground hover:text-red-600" onClick={logout}>
+                <LogOut className="size-4 mr-1" />
+                <span className="hidden sm:inline">Salir</span>
+              </Button>
+            </div>
           </div>
-          <div className="flex items-center gap-2">
-            {realtimeConnected ? (
-              <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200 text-xs">
-                <Wifi className="size-3 mr-1" /> Online
-              </Badge>
-            ) : (
-              <Badge variant="outline" className="bg-red-50 text-red-700 border-red-200 text-xs">
-                <WifiOff className="size-3 mr-1" /> Offline
-              </Badge>
-            )}
-          </div>
-        </div>
-      </header>
+        </header>
 
-      {/* Main content */}
-      <main className="flex-1 max-w-[1400px] mx-auto w-full px-4 py-4">
-        <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as TabId)}>
-          {/* Main tabs */}
-          <div className="mb-4">
-            <TabsList className="h-12 bg-amber-100/60 p-1">
-              {mainTabs.map((tab) => (
-                <TabsTrigger
-                  key={tab.id}
-                  value={tab.id}
-                  className="h-10 data-[state=active]:bg-amber-600 data-[state=active]:text-white gap-1.5 text-sm font-medium px-4"
-                >
-                  {tab.icon}
-                  <span className="hidden sm:inline">{tab.label}</span>
-                </TabsTrigger>
-              ))}
-            </TabsList>
-          </div>
+        {/* Main content */}
+        <main className="flex-1 max-w-[1400px] mx-auto w-full px-4 py-4">
+          <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as TabId)}>
+            {/* Main tabs */}
+            <div className="mb-4">
+              <TabsList className="h-12 bg-amber-100/60 p-1">
+                {mainTabs.map((tab) => (
+                  <TabsTrigger
+                    key={tab.id}
+                    value={tab.id}
+                    className="h-10 data-[state=active]:bg-amber-600 data-[state=active]:text-white gap-1.5 text-sm font-medium px-4"
+                  >
+                    {tab.icon}
+                    <span className="hidden sm:inline">{tab.label}</span>
+                  </TabsTrigger>
+                ))}
+              </TabsList>
+            </div>
 
-          <TabsContent value="camarero" className="mt-0">
-            <CamareroTab />
-          </TabsContent>
+            <TabsContent value="camarero" className="mt-0">
+              <CamareroTab />
+            </TabsContent>
 
-          <TabsContent value="cocina" className="mt-0">
-            <CocinaTab />
-          </TabsContent>
+            <TabsContent value="cocina" className="mt-0">
+              <CocinaTab />
+            </TabsContent>
 
-          <TabsContent value="caja" className="mt-0">
-            <CajaTab />
-          </TabsContent>
+            <TabsContent value="caja" className="mt-0">
+              <CajaTab />
+            </TabsContent>
 
-          {/* Admin tabs - small secondary row */}
-          <div className="mt-6 pt-4 border-t">
-            <p className="text-xs text-muted-foreground mb-2 uppercase tracking-wider">Administración</p>
-            <TabsList className="h-9 bg-muted p-0.5">
-              {adminTabs.map((tab) => (
-                <TabsTrigger
-                  key={tab.id}
-                  value={tab.id}
-                  className="h-8 data-[state=active]:bg-background gap-1 text-xs font-medium px-3"
-                >
-                  {tab.icon}
-                  <span className="hidden sm:inline">{tab.label}</span>
-                </TabsTrigger>
-              ))}
-            </TabsList>
-          </div>
+            {/* Admin tabs - small secondary row */}
+            <div className="mt-6 pt-4 border-t">
+              <p className="text-xs text-muted-foreground mb-2 uppercase tracking-wider">Administración</p>
+              <TabsList className="h-9 bg-muted p-0.5">
+                {adminTabs.map((tab) => (
+                  <TabsTrigger
+                    key={tab.id}
+                    value={tab.id}
+                    className="h-8 data-[state=active]:bg-background gap-1 text-xs font-medium px-3"
+                  >
+                    {tab.icon}
+                    <span className="hidden sm:inline">{tab.label}</span>
+                  </TabsTrigger>
+                ))}
+              </TabsList>
+            </div>
 
-          <TabsContent value="dashboard" className="mt-2">
-            <AdminStub title="Dashboard" icon={<LayoutDashboard className="size-12" />} />
-          </TabsContent>
+            <TabsContent value="dashboard" className="mt-2">
+              <AdminStub title="Dashboard" icon={<LayoutDashboard className="size-12" />} />
+            </TabsContent>
 
-          <TabsContent value="products" className="mt-2">
-            <AdminStub title="Productos" icon={<Package className="size-12" />} />
-          </TabsContent>
+            <TabsContent value="products" className="mt-2">
+              <AdminStub title="Productos" icon={<Package className="size-12" />} />
+            </TabsContent>
 
-          <TabsContent value="tables" className="mt-2">
-            <AdminStub title="Mesas" icon={<UtensilsCrossed className="size-12" />} />
-          </TabsContent>
+            <TabsContent value="tables" className="mt-2">
+              <AdminStub title="Mesas" icon={<UtensilsCrossed className="size-12" />} />
+            </TabsContent>
 
-          <TabsContent value="orders" className="mt-2">
-            <AdminStub title="Pedidos" icon={<Receipt className="size-12" />} />
-          </TabsContent>
+            <TabsContent value="orders" className="mt-2">
+              <AdminStub title="Pedidos" icon={<Receipt className="size-12" />} />
+            </TabsContent>
 
-          <TabsContent value="clients" className="mt-2">
-            <AdminStub title="Clientes" icon={<Users className="size-12" />} />
-          </TabsContent>
-        </Tabs>
-      </main>
-    </div>
+            <TabsContent value="clients" className="mt-2">
+              <AdminStub title="Clientes" icon={<Users className="size-12" />} />
+            </TabsContent>
+          </Tabs>
+        </main>
+      </div>
+    </AuthContext.Provider>
   )
 }

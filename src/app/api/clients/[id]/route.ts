@@ -1,10 +1,24 @@
+// ============================================================
+// /api/clients/[id] — Single client operations
+// GET    /api/clients/[id]  → Get client (any authenticated user)
+// PUT    /api/clients/[id]  → Update client (requires clients:update)
+// DELETE /api/clients/[id]  → Delete client (requires clients:delete)
+// ============================================================
+
 import { db } from '@/lib/db'
 import { NextResponse } from 'next/server'
+import { authenticateAndAuthorize, authenticateRequest } from '@/lib/auth'
+
+// ─── GET /api/clients/[id] ──────────────────────────────────
 
 export async function GET(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  // Any authenticated user can read a client
+  const auth = authenticateRequest(request)
+  if (!auth.success) return auth.response
+
   try {
     const { id } = await params
 
@@ -42,10 +56,15 @@ export async function GET(
   }
 }
 
+// ─── PUT /api/clients/[id] ──────────────────────────────────
+
 export async function PUT(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const auth = authenticateAndAuthorize(request, 'clients:update')
+  if ('error' in auth) return auth.error
+
   try {
     const { id } = await params
     const body = await request.json()
@@ -100,10 +119,15 @@ export async function PUT(
   }
 }
 
+// ─── DELETE /api/clients/[id] ───────────────────────────────
+
 export async function DELETE(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const auth = authenticateAndAuthorize(request, 'clients:delete')
+  if ('error' in auth) return auth.error
+
   try {
     const { id } = await params
 

@@ -1,10 +1,24 @@
+// ============================================================
+// /api/products/[id] — Single product operations
+// GET    /api/products/[id]  → Get product (any authenticated user)
+// PUT    /api/products/[id]  → Update product (requires products:update)
+// DELETE /api/products/[id]  → Delete product (requires products:delete)
+// ============================================================
+
 import { db } from '@/lib/db'
 import { NextResponse } from 'next/server'
+import { authenticateAndAuthorize, authenticateRequest } from '@/lib/auth'
+
+// ─── GET /api/products/[id] ─────────────────────────────────
 
 export async function GET(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  // Any authenticated user can read a product
+  const auth = authenticateRequest(request)
+  if (!auth.success) return auth.response
+
   try {
     const { id } = await params
 
@@ -29,10 +43,15 @@ export async function GET(
   }
 }
 
+// ─── PUT /api/products/[id] ─────────────────────────────────
+
 export async function PUT(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const auth = authenticateAndAuthorize(request, 'products:update')
+  if ('error' in auth) return auth.error
+
   try {
     const { id } = await params
     const body = await request.json()
@@ -78,10 +97,15 @@ export async function PUT(
   }
 }
 
+// ─── DELETE /api/products/[id] ──────────────────────────────
+
 export async function DELETE(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const auth = authenticateAndAuthorize(request, 'products:delete')
+  if ('error' in auth) return auth.error
+
   try {
     const { id } = await params
 

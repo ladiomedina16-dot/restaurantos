@@ -12,7 +12,6 @@ export const getSocket = (): Socket => {
 
     socket.on('connect', () => {
       console.log('[RT] Connected')
-      socket!.emit('join-room', 'admin')
     })
 
     socket.on('disconnect', () => {

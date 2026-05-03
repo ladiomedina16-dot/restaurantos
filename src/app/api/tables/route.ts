@@ -1,7 +1,20 @@
+// ============================================================
+// /api/tables — Table management
+// GET  /api/tables   → List tables (any authenticated user)
+// POST /api/tables   → Create table (requires tables:create)
+// ============================================================
+
 import { db } from '@/lib/db'
 import { NextResponse } from 'next/server'
+import { authenticateAndAuthorize, authenticateRequest } from '@/lib/auth'
+
+// ─── GET /api/tables ────────────────────────────────────────
 
 export async function GET(request: Request) {
+  // Any authenticated user can read tables
+  const auth = authenticateRequest(request)
+  if (!auth.success) return auth.response
+
   try {
     const { searchParams } = new URL(request.url)
     const status = searchParams.get('status')
@@ -32,7 +45,12 @@ export async function GET(request: Request) {
   }
 }
 
+// ─── POST /api/tables ───────────────────────────────────────
+
 export async function POST(request: Request) {
+  const auth = authenticateAndAuthorize(request, 'tables:create')
+  if ('error' in auth) return auth.error
+
   try {
     const body = await request.json()
     const { number, capacity, zone, notes } = body as {

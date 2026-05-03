@@ -1,16 +1,37 @@
+// ============================================================
+// /api/orders/[id]/pay — Close the bill
+// POST /api/orders/[id]/pay → Apply 5ª gratis, CRM points, create Payment, free table
+// Requires orders:pay permission (caja/admin)
+// ============================================================
+
 import { db } from '@/lib/db'
 import { NextResponse } from 'next/server'
+import { authenticateAndAuthorize } from '@/lib/auth'
+import { emitTableCleared, emitOrderStatusChanged } from '@/lib/realtime'
 
-// POST /api/orders/[id]/pay
-// Cierra la cuenta: aplica descuento 5ª gratis, suma puntos CRM, libera mesa
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const auth = authenticateAndAuthorize(request, 'orders:pay')
+  if ('error' in auth) return auth.error
+  const { user } = auth
+
   try {
     const { id } = await params
     const body = await request.json()
-    const { applyDiscount = true } = body as { applyDiscount?: boolean }
+    const { applyDiscount = true, paymentMethod = 'efectivo' } = body as {
+      applyDiscount?: boolean
+      paymentMethod?: 'efectivo' | 'tarjeta'
+    }
+
+    // Validate payment method
+    if (!['efectivo', 'tarjeta'].includes(paymentMethod)) {
+      return NextResponse.json(
+        { error: 'Método de pago inválido. Use "efectivo" o "tarjeta".' },
+        { status: 400 }
+      )
+    }
 
     const existing = await db.order.findUnique({
       where: { id },
@@ -76,6 +97,19 @@ export async function POST(
         },
       })
 
+      // Create Payment record for audit trail
+      await tx.payment.create({
+        data: {
+          orderId: id,
+          userId: user.userId,
+          amount: totalAfterDiscount,
+          method: paymentMethod,
+          discount,
+          freeDrinks: freeDrinkCount,
+          pointsEarned,
+        },
+      })
+
       // Liberar mesa si no hay otros pedidos activos
       const activeOrdersCount = await tx.order.count({
         where: {
@@ -85,7 +119,9 @@ export async function POST(
         },
       })
 
-      if (activeOrdersCount === 0) {
+      const tableFreed = activeOrdersCount === 0
+
+      if (tableFreed) {
         await tx.table.update({
           where: { id: existing.tableId },
           data: { status: 'available' },
@@ -102,17 +138,26 @@ export async function POST(
         })
       }
 
-      return updatedOrder
+      return { updatedOrder, tableFreed }
     })
 
+    // Emit real-time events AFTER successful transaction
+    await emitOrderStatusChanged(result.updatedOrder)
+
+    if (result.tableFreed) {
+      await emitTableCleared(existing.tableId, existing.table.number)
+    }
+
     return NextResponse.json({
-      order: result,
+      order: result.updatedOrder,
       payment: {
         subtotal,
         discount,
         freeDrinkCount,
         total: totalAfterDiscount,
         pointsEarned,
+        paymentMethod,
+        processedBy: user.username,
         clientId: existing.clientId,
         clientName: existing.client?.name,
       },

@@ -1,10 +1,25 @@
+// ============================================================
+// /api/tables/[id] — Single table operations
+// GET    /api/tables/[id]  → Get table (any authenticated user)
+// PUT    /api/tables/[id]  → Update table (requires tables:update)
+// DELETE /api/tables/[id]  → Delete table (requires tables:delete)
+// ============================================================
+
 import { db } from '@/lib/db'
 import { NextResponse } from 'next/server'
+import { authenticateAndAuthorize, authenticateRequest } from '@/lib/auth'
+import { emitTableStatusChanged } from '@/lib/realtime'
+
+// ─── GET /api/tables/[id] ───────────────────────────────────
 
 export async function GET(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  // Any authenticated user can read a table
+  const auth = authenticateRequest(request)
+  if (!auth.success) return auth.response
+
   try {
     const { id } = await params
 
@@ -35,10 +50,15 @@ export async function GET(
   }
 }
 
+// ─── PUT /api/tables/[id] ───────────────────────────────────
+
 export async function PUT(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const auth = authenticateAndAuthorize(request, 'tables:update')
+  if ('error' in auth) return auth.error
+
   try {
     const { id } = await params
     const body = await request.json()
@@ -91,6 +111,11 @@ export async function PUT(
       data: updateData,
     })
 
+    // Emit real-time event if status changed
+    if (status !== undefined && status !== existing.status) {
+      await emitTableStatusChanged(table)
+    }
+
     return NextResponse.json({ table })
   } catch (error) {
     console.error('Table PUT error:', error)
@@ -101,10 +126,15 @@ export async function PUT(
   }
 }
 
+// ─── DELETE /api/tables/[id] ────────────────────────────────
+
 export async function DELETE(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const auth = authenticateAndAuthorize(request, 'tables:delete')
+  if ('error' in auth) return auth.error
+
   try {
     const { id } = await params
 

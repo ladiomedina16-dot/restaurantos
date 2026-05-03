@@ -1,7 +1,20 @@
+// ============================================================
+// /api/clients — Client management
+// GET  /api/clients   → List clients (any authenticated user)
+// POST /api/clients   → Create client (requires clients:create)
+// ============================================================
+
 import { db } from '@/lib/db'
 import { NextResponse } from 'next/server'
+import { authenticateAndAuthorize, authenticateRequest } from '@/lib/auth'
+
+// ─── GET /api/clients ───────────────────────────────────────
 
 export async function GET(request: Request) {
+  // Any authenticated user can read clients
+  const auth = authenticateRequest(request)
+  if (!auth.success) return auth.response
+
   try {
     const { searchParams } = new URL(request.url)
     const search = searchParams.get('search')
@@ -35,7 +48,12 @@ export async function GET(request: Request) {
   }
 }
 
+// ─── POST /api/clients ──────────────────────────────────────
+
 export async function POST(request: Request) {
+  const auth = authenticateAndAuthorize(request, 'clients:create')
+  if ('error' in auth) return auth.error
+
   try {
     const body = await request.json()
     const { name, phone, email, notes } = body as {

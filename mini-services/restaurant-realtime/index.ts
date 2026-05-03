@@ -1,6 +1,12 @@
 import { createServer } from 'http'
 import { Server } from 'socket.io'
 
+// ============================================================
+// RestaurantOS Real-time Server v2
+// SERVER-ONLY emissions: API routes emit via HTTP POST
+// Clients can only LISTEN, never emit broadcast events
+// ============================================================
+
 const httpServer = createServer()
 const io = new Server(httpServer, {
   path: '/',
@@ -12,126 +18,109 @@ const io = new Server(httpServer, {
   pingInterval: 25000,
 })
 
-// Tipos de eventos del restaurante
-interface OrderEvent {
-  type: 'created' | 'updated' | 'status_changed' | 'deleted'
-  order: any
-  timestamp: string
-}
+// ─── Shared secret for API → Socket auth ────────────────────
+const API_SECRET = process.env.API_SECRET || 'restaurantos-api-secret'
 
-interface TableEvent {
-  type: 'status_changed' | 'updated'
-  table: any
-  timestamp: string
-}
+// ─── Socket.io connections (clients) ────────────────────────
 
-interface ProductEvent {
-  type: 'stock_updated' | 'updated' | 'created' | 'deleted'
-  product: any
-  timestamp: string
-}
+io.on('connection', (socket: any) => {
+  console.log(`[RT] Connected: ${socket.id}`)
 
-// Sala de cocina: solo eventos de pedidos para cocina
-// Sala de barra: eventos de pedidos y mesas
-// Sala de admin: todos los eventos
-
-io.on('connection', (socket) => {
-  console.log(`[Restaurant RT] Connected: ${socket.id}`)
-
-  // ─── UNIRSE A SALAS ──────────────────────────────
+  // Clients can only join rooms (for receiving targeted events)
   socket.on('join-room', (room: string) => {
-    socket.join(room)
-    console.log(`[Restaurant RT] ${socket.id} joined room: ${room}`)
-    socket.emit('room-joined', { room, timestamp: new Date().toISOString() })
+    // Only allow joining valid rooms
+    const validRooms = ['kitchen', 'bar', 'floor', 'admin', 'caja']
+    if (validRooms.includes(room)) {
+      socket.join(room)
+      console.log(`[RT] ${socket.id} joined room: ${room}`)
+      socket.emit('room-joined', { room, timestamp: new Date().toISOString() })
+    }
   })
 
-  // ─── PEDIDOS EN TIEMPO REAL ──────────────────────
-  // Camarero crea pedido → cocina y caja lo ven al instante
-  socket.on('order-created', (data: OrderEvent) => {
-    console.log(`[Restaurant RT] 🍽️ Order created: ${data.order?.id} (Mesa ${data.order?.table?.number ?? '?'})`)
-    io.to('kitchen').emit('order-created', data)
-    io.to('admin').emit('order-created', data)
-    io.to('bar').emit('order-created', data)
-    io.to('caja').emit('order-created', data)
-  })
+  // ─── CLIENT EMITS ARE IGNORED FOR BROADCAST EVENTS ────
+  // order-created, order-ready, table-cleared etc. are ONLY emitted
+  // by the server after API validation via the HTTP endpoint below.
+  // We still handle join-room for subscription purposes.
 
-  socket.on('order-updated', (data: OrderEvent) => {
-    console.log(`[Restaurant RT] Order updated: ${data.order?.id}`)
-    io.to('kitchen').emit('order-updated', data)
-    io.to('admin').emit('order-updated', data)
-    io.to('bar').emit('order-updated', data)
-    io.to('caja').emit('order-updated', data)
-  })
-
-  socket.on('order-status-changed', (data: OrderEvent) => {
-    console.log(`[Restaurant RT] Order status: ${data.order?.id} → ${data.order?.status}`)
-    io.to('kitchen').emit('order-status-changed', data)
-    io.to('admin').emit('order-status-changed', data)
-    io.to('bar').emit('order-status-changed', data)
-    io.to('floor').emit('order-status-changed', data)
-    io.to('caja').emit('order-status-changed', data)
-  })
-
-  // ─── COCINA TERMINA PEDIDO → Camarero y Caja ─────
-  socket.on('order-ready', (data: { type: string; order: any; tableId: string; timestamp: string }) => {
-    console.log(`[Restaurant RT] ✅ Order READY: ${data.order?.id} (Mesa ${data.order?.table?.number ?? '?'})`)
-    io.to('floor').emit('order-ready', data)
-    io.to('admin').emit('order-ready', data)
-    io.to('bar').emit('order-ready', data)
-    io.to('caja').emit('order-ready', data)
-    io.to('kitchen').emit('order-ready', data)
-  })
-
-  // ─── CAJA LIBERA MESA ────────────────────────────
-  socket.on('table-cleared', (data: { tableId: string; tableNumber: number; timestamp: string }) => {
-    console.log(`[Restaurant RT] 💰 Table cleared: Mesa ${data.tableNumber}`)
-    io.to('admin').emit('table-cleared', data)
-    io.to('floor').emit('table-cleared', data)
-    io.to('bar').emit('table-cleared', data)
-    io.to('caja').emit('table-cleared', data)
-    io.to('kitchen').emit('table-cleared', data)
-  })
-
-  // ─── MESAS EN TIEMPO REAL ────────────────────────
-  socket.on('table-status-changed', (data: TableEvent) => {
-    console.log(`[Restaurant RT] Table ${data.table?.number} → ${data.table?.status}`)
-    io.to('admin').emit('table-status-changed', data)
-    io.to('floor').emit('table-status-changed', data)
-    io.to('bar').emit('table-status-changed', data)
-    io.to('caja').emit('table-status-changed', data)
-  })
-
-  // ─── STOCK DE PRODUCTOS ──────────────────────────
-  socket.on('product-stock-updated', (data: ProductEvent) => {
-    console.log(`[Restaurant RT] Product ${data.product?.name} stock: ${data.product?.stock}`)
-    io.to('kitchen').emit('product-stock-updated', data)
-    io.to('admin').emit('product-stock-updated', data)
-    io.to('bar').emit('product-stock-updated', data)
-    io.to('caja').emit('product-stock-updated', data)
-  })
-
-  // ─── DESCONEXIÓN ─────────────────────────────────
   socket.on('disconnect', () => {
-    console.log(`[Restaurant RT] Disconnected: ${socket.id}`)
+    console.log(`[RT] Disconnected: ${socket.id}`)
   })
 
-  socket.on('error', (error) => {
-    console.error(`[Restaurant RT] Error (${socket.id}):`, error)
+  socket.on('error', (error: any) => {
+    console.error(`[RT] Error (${socket.id}):`, error)
   })
+})
+
+// ─── HTTP Endpoint for Server-Side Emission ─────────────────
+// POST /emit — called by Next.js API routes after DB operations
+// Requires API secret header for security
+
+const emitHandler = (req: any, res: any) => {
+  if (req.method !== 'POST') {
+    res.writeHead(405, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({ error: 'Method not allowed' }))
+    return
+  }
+
+  let body = ''
+  req.on('data', (chunk: any) => { body += chunk })
+  req.on('end', () => {
+    try {
+      const data = JSON.parse(body)
+      const { event, payload, rooms, secret } = data
+
+      // Verify API secret
+      if (secret !== API_SECRET) {
+        res.writeHead(403, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Forbidden' }))
+        return
+      }
+
+      if (!event || !payload) {
+        res.writeHead(400, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Missing event or payload' }))
+        return
+      }
+
+      // Emit to specified rooms or all
+      const targetRooms = rooms || ['kitchen', 'bar', 'floor', 'admin', 'caja']
+
+      console.log(`[RT] 🔔 Server emit: ${event} → rooms: ${targetRooms.join(',')}`)
+
+      for (const room of targetRooms) {
+        io.to(room).emit(event, payload)
+      }
+
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ success: true, event, rooms: targetRooms }))
+    } catch (err) {
+      res.writeHead(400, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ error: 'Invalid JSON' }))
+    }
+  })
+}
+
+// Route: POST /emit
+httpServer.on('request', (req: any, res: any) => {
+  if (req.url === '/emit') {
+    return emitHandler(req, res)
+  }
+  // Let Socket.io handle everything else
 })
 
 const PORT = 3003
 httpServer.listen(PORT, () => {
-  console.log(`[Restaurant RT] Realtime server running on port ${PORT}`)
-  console.log(`[Restaurant RT] Rooms: kitchen, bar, floor, admin`)
+  console.log(`[RT] Realtime server v2 running on port ${PORT}`)
+  console.log(`[RT] Server-only emissions via POST /emit`)
+  console.log(`[RT] Rooms: kitchen, bar, floor, admin, caja`)
 })
 
 process.on('SIGTERM', () => {
-  console.log('[Restaurant RT] SIGTERM, shutting down...')
+  console.log('[RT] SIGTERM, shutting down...')
   httpServer.close(() => process.exit(0))
 })
 
 process.on('SIGINT', () => {
-  console.log('[Restaurant RT] SIGINT, shutting down...')
+  console.log('[RT] SIGINT, shutting down...')
   httpServer.close(() => process.exit(0))
 })

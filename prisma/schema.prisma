@@ -1,6 +1,6 @@
 // ============================================================
-// RESTAURANT APP - Production Schema
-// Equivalente a Supabase tables + RLS policies
+// RESTAURANT APP - Production Schema v2
+// Secure, role-based, with audit trail
 // ============================================================
 
 generator client {
@@ -12,15 +12,22 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// ─── SUPER ADMIN ────────────────────────────────────────────
-// Único usuario con acceso total (equivalente a Supabase Auth + admin role)
-model Admin {
+// ─── USUARIOS (replaces Admin) ──────────────────────────────
+// Roles: super_admin, admin, encargado, camarero, cocina, caja
+model User {
   id           String   @id @default(cuid())
   username     String   @unique
-  passwordHash String
-  role         String   @default("super_admin") // solo existe este rol
+  passwordHash String   // bcrypt hashed
+  name         String   @default("")   // display name
+  role         String   @default("camarero") // super_admin, admin, encargado, camarero, cocina, caja
+  active       Boolean  @default(true)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
+
+  // Relations - who created/processed things
+  ordersCreated Order[]  @relation("OrderCreator")
+  ordersReady   Order[]  @relation("OrderFinisher")
+  payments      Payment[]
 }
 
 // ─── PRODUCTOS ──────────────────────────────────────────────
@@ -28,8 +35,8 @@ model Product {
   id          String   @id @default(cuid())
   name        String
   description String   @default("")
-  price       Float    // precio en euros
-  category    String   @default("general") // bebida, comida, postre, general
+  price       Float    // precio en euros (source of truth, backend-only calculation)
+  category    String   @default("general") // bebida, tapa_fria, tapa_caliente, montadito, racion, postre, comida, general
   stock       Int      @default(0)
   imageUrl    String   @default("")
   active      Boolean  @default(true)
@@ -58,7 +65,7 @@ model Client {
   name      String
   phone     String   @unique
   email     String   @default("")
-  points    Int      @default(0)      // puntos de fidelidad (ej: la 5ª cerveza gratis)
+  points    Int      @default(0)      // puntos de fidelidad (1€ = 1 punto)
   visits    Int      @default(0)
   notes     String   @default("")
   createdAt DateTime @default(now())
@@ -69,32 +76,56 @@ model Client {
 
 // ─── PEDIDOS ────────────────────────────────────────────────
 model Order {
-  id         String   @id @default(cuid())
-  tableId    String
-  clientId   String?  // puede ser invitado sin registro
-  status     String   @default("pending") // pending, in_progress, ready, served, paid, cancelled
-  subtotal   Float    @default(0)  // total antes de descuento
-  discount   Float    @default(0)  // descuento aplicado (5ª gratis, etc.)
-  total      Float    @default(0)  // subtotal - discount
-  notes      String   @default("")
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  id           String   @id @default(cuid())
+  tableId      String
+  clientId     String?  // puede ser invitado sin registro
+  status       String   @default("pending") // pending, in_progress, ready, served, paid, cancelled
+  subtotal     Float    @default(0)  // total antes de descuento (calculated backend-only)
+  discount     Float    @default(0)  // descuento aplicado (5ª gratis, etc.)
+  total        Float    @default(0)  // subtotal - discount
+  notes        String   @default("")
+  createdById  String?  // who created the order
+  finishedById String?  // who marked it ready
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
-  table      Table      @relation(fields: [tableId], references: [id])
-  client     Client?    @relation(fields: [clientId], references: [id])
-  items      OrderItem[]
+  table       Table      @relation(fields: [tableId], references: [id])
+  client      Client?    @relation(fields: [clientId], references: [id])
+  createdBy   User?      @relation("OrderCreator", fields: [createdById], references: [id])
+  finishedBy  User?      @relation("OrderFinisher", fields: [finishedById], references: [id])
+  items       OrderItem[]
+  payments    Payment[]
 }
 
 // ─── ITEMS DE PEDIDO ────────────────────────────────────────
 model OrderItem {
-  id        String @id @default(cuid())
-  orderId   String
-  productId String
-  quantity  Int    @default(1)
-  unitPrice Float  // precio al momento del pedido (snapshot)
-  subtotal  Float  // quantity * unitPrice
-  notes     String @default("")
+  id         String  @id @default(cuid())
+  orderId    String
+  productId  String
+  quantity   Int     @default(1)
+  unitPrice  Float   // precio al momento del pedido (snapshot, backend-only)
+  subtotal   Float   // quantity * unitPrice (backend-only calculation)
+  notes      String  @default("")       // existing field for general notes
+  modifiers  String  @default("")       // JSON: ["sin hielo", "poco hecho", "extra picante"]
+  createdAt  DateTime @default(now())
 
   order     Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
   product   Product @relation(fields: [productId], references: [id])
+}
+
+// ─── PAGOS (audit trail) ───────────────────────────────────
+model Payment {
+  id         String   @id @default(cuid())
+  orderId    String
+  userId     String   // who processed the payment
+  amount     Float    // amount paid
+  method     String   // efectivo, tarjeta
+  discount   Float    @default(0)  // discount applied
+  freeDrinks Int      @default(0)  // number of free drinks (5ª gratis)
+  pointsUsed Int      @default(0)  // points redeemed (future)
+  pointsEarned Int    @default(0)  // loyalty points earned
+  createdAt  DateTime @default(now())
+
+  order      Order    @relation(fields: [orderId], references: [id])
+  user       User     @relation(fields: [userId], references: [id])
 }

@@ -1,10 +1,23 @@
+// ============================================================
+// /api/orders/[id] — Single order operations
+// GET  /api/orders/[id]  → Get order (requires orders:read)
+// PUT  /api/orders/[id]  → Update order (requires orders:update)
+// ============================================================
+
 import { db } from '@/lib/db'
 import { NextResponse } from 'next/server'
+import { authenticateAndAuthorize } from '@/lib/auth'
+import { emitOrderStatusChanged, emitOrderReady } from '@/lib/realtime'
+
+// ─── GET /api/orders/[id] ───────────────────────────────────
 
 export async function GET(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const auth = authenticateAndAuthorize(request, 'orders:read')
+  if ('error' in auth) return auth.error
+
   try {
     const { id } = await params
 
@@ -18,6 +31,12 @@ export async function GET(
         },
         table: true,
         client: true,
+        createdBy: {
+          select: { id: true, username: true, name: true, role: true },
+        },
+        finishedBy: {
+          select: { id: true, username: true, name: true, role: true },
+        },
       },
     })
 
@@ -38,10 +57,16 @@ export async function GET(
   }
 }
 
+// ─── PUT /api/orders/[id] ───────────────────────────────────
+
 export async function PUT(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const auth = authenticateAndAuthorize(request, 'orders:update')
+  if ('error' in auth) return auth.error
+  const { user } = auth
+
   try {
     const { id } = await params
     const body = await request.json()
@@ -101,6 +126,12 @@ export async function PUT(
             },
             table: true,
             client: true,
+            createdBy: {
+              select: { id: true, username: true, name: true, role: true },
+            },
+            finishedBy: {
+              select: { id: true, username: true, name: true, role: true },
+            },
           },
         })
 
@@ -124,6 +155,48 @@ export async function PUT(
         return updatedOrder
       })
 
+      // Emit real-time status change
+      await emitOrderStatusChanged(order)
+
+      return NextResponse.json({ order })
+    }
+
+    // When status changes to "ready", save finishedById
+    if (status === 'ready' && existing.status !== 'ready') {
+      const order = await db.$transaction(async (tx) => {
+        const updateData: Record<string, unknown> = {
+          status: 'ready',
+          finishedById: user.userId,
+        }
+        if (notes !== undefined) updateData.notes = notes
+
+        const updatedOrder = await tx.order.update({
+          where: { id },
+          data: updateData,
+          include: {
+            items: {
+              include: {
+                product: true,
+              },
+            },
+            table: true,
+            client: true,
+            createdBy: {
+              select: { id: true, username: true, name: true, role: true },
+            },
+            finishedBy: {
+              select: { id: true, username: true, name: true, role: true },
+            },
+          },
+        })
+
+        return updatedOrder
+      })
+
+      // Emit real-time events for status change and ready
+      await emitOrderStatusChanged(order)
+      await emitOrderReady(order)
+
       return NextResponse.json({ order })
     }
 
@@ -145,6 +218,12 @@ export async function PUT(
             },
             table: true,
             client: true,
+            createdBy: {
+              select: { id: true, username: true, name: true, role: true },
+            },
+            finishedBy: {
+              select: { id: true, username: true, name: true, role: true },
+            },
           },
         })
 
@@ -167,6 +246,9 @@ export async function PUT(
         return updatedOrder
       })
 
+      // Emit real-time status change
+      await emitOrderStatusChanged(order)
+
       return NextResponse.json({ order })
     }
 
@@ -186,8 +268,19 @@ export async function PUT(
         },
         table: true,
         client: true,
+        createdBy: {
+          select: { id: true, username: true, name: true, role: true },
+        },
+        finishedBy: {
+          select: { id: true, username: true, name: true, role: true },
+        },
       },
     })
+
+    // Emit real-time status change for any status update
+    if (status !== undefined && status !== existing.status) {
+      await emitOrderStatusChanged(order)
+    }
 
     return NextResponse.json({ order })
   } catch (error) {

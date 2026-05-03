@@ -1,7 +1,20 @@
+// ============================================================
+// /api/products — Product management
+// GET  /api/products   → List products (any authenticated user)
+// POST /api/products   → Create product (requires products:create)
+// ============================================================
+
 import { db } from '@/lib/db'
 import { NextResponse } from 'next/server'
+import { authenticateAndAuthorize, authenticateRequest } from '@/lib/auth'
+
+// ─── GET /api/products ──────────────────────────────────────
 
 export async function GET(request: Request) {
+  // Any authenticated user can read products
+  const auth = authenticateRequest(request)
+  if (!auth.success) return auth.response
+
   try {
     const { searchParams } = new URL(request.url)
     const category = searchParams.get('category')
@@ -32,7 +45,12 @@ export async function GET(request: Request) {
   }
 }
 
+// ─── POST /api/products ─────────────────────────────────────
+
 export async function POST(request: Request) {
+  const auth = authenticateAndAuthorize(request, 'products:create')
+  if ('error' in auth) return auth.error
+
   try {
     const body = await request.json()
     const { name, description, price, category, stock, imageUrl } = body as {

@@ -1,7 +1,16 @@
+// ============================================================
+// /api/dashboard — Dashboard analytics
+// GET /api/dashboard → Dashboard data (requires dashboard:read)
+// ============================================================
+
 import { db } from '@/lib/db'
 import { NextResponse } from 'next/server'
+import { authenticateAndAuthorize } from '@/lib/auth'
 
-export async function GET() {
+export async function GET(request: Request) {
+  const auth = authenticateAndAuthorize(request, 'dashboard:read')
+  if ('error' in auth) return auth.error
+
   try {
     // Get today's date range
     const now = new Date()
