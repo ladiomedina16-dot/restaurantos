@@ -69,6 +69,7 @@ export interface JwtPayload {
   userId: string
   username: string
   role: UserRole
+  zone?: string         // assigned zone for camareros: main, terrace, bar, private
   restaurantId?: string  // null for super_admin
 }
 
@@ -170,6 +171,8 @@ export function canAccessTab(role: UserRole, tab: string): boolean {
       return ['super_admin', 'admin', 'encargado', 'cocina'].includes(role)
     case 'caja':
       return ['super_admin', 'admin', 'encargado', 'caja'].includes(role)
+    case 'reportes':
+      return ['super_admin', 'admin', 'encargado'].includes(role)
     case 'dashboard':
     case 'products':
     case 'tables':
@@ -180,6 +183,17 @@ export function canAccessTab(role: UserRole, tab: string): boolean {
     default:
       return false
   }
+}
+
+/**
+ * Get the zone filter for a camarero user.
+ * - camarero with zone: only see their zone
+ * - camarero without zone: see all zones
+ * - non-camarero: see all zones (returns null)
+ */
+export function getZoneFilter(user: JwtPayload): string | null {
+  if (user.role !== 'camarero') return null
+  return user.zone || null // null means no filter (all zones)
 }
 
 // ─── API Auth Helper ────────────────────────────────────────

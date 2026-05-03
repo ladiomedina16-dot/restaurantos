@@ -114,6 +114,7 @@ export const createUserSchema = z.object({
   name: z.string().max(100).optional().default(''),
   role: z.enum(['super_admin', 'admin', 'encargado', 'camarero', 'cocina', 'caja']).optional().default('camarero'),
   active: z.boolean().optional().default(true),
+  zone: z.enum(['main', 'terrace', 'bar', 'private']).optional().nullable(),
   restaurantId: z.string().optional().nullable(),
 })
 

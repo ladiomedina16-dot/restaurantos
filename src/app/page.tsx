@@ -1882,7 +1882,7 @@ export default function RestaurantPage() {
                 .then((r) => r.json())
                 .then((data) => {
                   if (data.token) {
-                    const userData = { userId: data.user.id, username: data.user.username, name: data.user.name, role: data.user.role, restaurantId: data.user.restaurantId, mustChangePassword: data.mustChangePassword ?? data.user.mustChangePassword ?? false }
+                    const userData = { userId: data.user.id, username: data.user.username, name: data.user.name, role: data.user.role, zone: data.user.zone ?? null, restaurantId: data.user.restaurantId, mustChangePassword: data.mustChangePassword ?? data.user.mustChangePassword ?? false }
                     setAuthToken(data.token)
                     setCurrentUser(userData)
                     localStorage.setItem('restaurantos_auth', JSON.stringify({ token: data.token, refreshToken: data.refreshToken, user: userData }))

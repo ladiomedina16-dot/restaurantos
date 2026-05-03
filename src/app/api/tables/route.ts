@@ -6,7 +6,7 @@
 
 import { db } from '@/lib/db'
 import { NextResponse } from 'next/server'
-import { authenticateAndAuthorize, requireRestaurantScope } from '@/lib/auth'
+import { authenticateAndAuthorize, requireRestaurantScope, getZoneFilter } from '@/lib/auth'
 import { createTableSchema, validateInput } from '@/lib/validations'
 import { createAuditLog } from '@/lib/audit'
 import { handleApiError } from '@/lib/errors'
@@ -32,8 +32,14 @@ export async function GET(request: Request) {
       where.status = status
     }
 
+    // Zone filtering: query param takes priority, then user's zone restriction
     if (zone) {
       where.zone = zone
+    } else {
+      const userZone = getZoneFilter(auth.user)
+      if (userZone) {
+        where.zone = userZone
+      }
     }
 
     const tables = await db.table.findMany({

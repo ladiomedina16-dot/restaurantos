@@ -52,7 +52,7 @@ export async function POST(request: Request) {
       // Verify user still exists and is active
       const user = await db.user.findUnique({
         where: { id: payload.userId },
-        select: { id: true, username: true, name: true, role: true, active: true, restaurantId: true, mustChangePassword: true },
+        select: { id: true, username: true, name: true, role: true, active: true, zone: true, restaurantId: true, mustChangePassword: true },
       })
 
       if (!user || !user.active) {
@@ -66,6 +66,7 @@ export async function POST(request: Request) {
         userId: user.id,
         username: user.username,
         role: user.role as JwtPayload['role'],
+        zone: user.zone ?? undefined,
         restaurantId: user.restaurantId ?? undefined,
       }
 
@@ -80,6 +81,7 @@ export async function POST(request: Request) {
           username: user.username,
           name: user.name,
           role: user.role,
+          zone: user.zone ?? null,
           restaurantId: user.restaurantId,
           mustChangePassword: user.mustChangePassword,
         },
@@ -138,6 +140,7 @@ export async function POST(request: Request) {
       userId: user.id,
       username: user.username,
       role: user.role as JwtPayload['role'],
+      zone: (user as any).zone ?? undefined,
       restaurantId: user.restaurantId ?? undefined,
     }
 
@@ -164,6 +167,7 @@ export async function POST(request: Request) {
         username: user.username,
         name: user.name,
         role: user.role,
+        zone: (user as any).zone ?? null,
         restaurantId: user.restaurantId,
         mustChangePassword: user.mustChangePassword,
       },
@@ -203,6 +207,7 @@ export async function GET(request: Request) {
         name: true,
         role: true,
         active: true,
+        zone: true,
         restaurantId: true,
         mustChangePassword: true,
         createdAt: true,
@@ -216,7 +221,7 @@ export async function GET(request: Request) {
       )
     }
 
-    return NextResponse.json({ user })
+    return NextResponse.json({ user: { ...user, zone: user.zone ?? null } })
   } catch (error) {
     return handleApiError('Auth GET /me', error)
   }

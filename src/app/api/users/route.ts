@@ -68,6 +68,7 @@ export async function GET(request: Request) {
         role: true,
         active: true,
         mustChangePassword: true,
+        zone: true,
         restaurantId: true,
         createdAt: true,
         updatedAt: true,
@@ -95,7 +96,7 @@ export async function POST(request: Request) {
     const validation = validateInput(createUserSchema, body)
     if (!validation.success) return validation.error
 
-    const { username, password, name, role: userRole, active, restaurantId: bodyRestaurantId } = validation.data
+    const { username, password, name, role: userRole, active, zone, restaurantId: bodyRestaurantId } = validation.data
 
     // ─── Role elevation check ────────────────────────────
     // Only super_admin can create super_admin or admin users
@@ -143,6 +144,7 @@ export async function POST(request: Request) {
         role: userRole,
         active,
         mustChangePassword,
+        zone: zone ?? null,
         restaurantId: targetRestaurantId,
       },
       select: {
@@ -152,6 +154,7 @@ export async function POST(request: Request) {
         role: true,
         active: true,
         mustChangePassword: true,
+        zone: true,
         restaurantId: true,
         createdAt: true,
       },
@@ -164,7 +167,7 @@ export async function POST(request: Request) {
       action: 'user_created',
       entityType: 'user',
       entityId: newUser.id,
-      details: { username, role: userRole, active, mustChangePassword, restaurantId: targetRestaurantId },
+      details: { username, role: userRole, active, mustChangePassword, zone, restaurantId: targetRestaurantId },
       ipAddress: request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || undefined,
     })
 
@@ -201,7 +204,7 @@ export async function PUT(request: Request) {
     // Fetch target user
     const targetUser = await db.user.findUnique({
       where: { id: targetUserId },
-      select: { id: true, username: true, role: true, active: true, restaurantId: true },
+      select: { id: true, username: true, role: true, active: true, zone: true, restaurantId: true },
     })
 
     if (!targetUser) {
@@ -254,6 +257,7 @@ export async function PUT(request: Request) {
         role: true,
         active: true,
         mustChangePassword: true,
+        zone: true,
         restaurantId: true,
         createdAt: true,
         updatedAt: true,

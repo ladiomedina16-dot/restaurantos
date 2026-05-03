@@ -45,6 +45,7 @@ model User {
   role              String    @default("camarero") // super_admin, admin, encargado, camarero, cocina, caja
   active            Boolean   @default(true)
   mustChangePassword Boolean  @default(false) // force password change on first login
+  zone              String?   // assigned zone for camareros: main, terrace, bar, private (null = all zones)
   restaurantId      String?   // null for super_admin (access to all)
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt

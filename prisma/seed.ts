@@ -7,170 +7,333 @@ import bcrypt from 'bcryptjs'
 const hash = (pw: string) => bcrypt.hashSync(pw, 12)
 
 async function seed() {
-  console.log('🌱 Seeding database with multi-restaurant data...')
+  console.log('🌱 Seeding RestaurantOS with real Sevillian data...\n')
 
-  // ─── RESTAURANTS ────────────────────────────────────────
-  const restaurants = await Promise.all([
-    db.restaurant.upsert({
-      where: { slug: 'la-carta-de-sevilla' },
-      update: { name: 'La Carta de Sevilla', address: 'Calle Betis 42, Sevilla', phone: '954123456', subscriptionStatus: 'active' },
-      create: { name: 'La Carta de Sevilla', slug: 'la-carta-de-sevilla', address: 'Calle Betis 42, Sevilla', phone: '954123456', subscriptionStatus: 'active' },
-    }),
-    db.restaurant.upsert({
-      where: { slug: 'taberna-del-puerto' },
-      update: { name: 'Taberna del Puerto', address: 'Muelle de las Delicias 8, Sevilla', phone: '954789012', subscriptionStatus: 'active' },
-      create: { name: 'Taberna del Puerto', slug: 'taberna-del-puerto', address: 'Muelle de las Delicias 8, Sevilla', phone: '954789012', subscriptionStatus: 'active' },
-    }),
-  ])
-  console.log(`✅ ${restaurants.length} restaurantes creados`)
+  // ─── CLEAN SLATE: Delete existing data in correct order ────
+  console.log('🧹 Cleaning existing data...')
+  await db.auditLog.deleteMany()
+  await db.payment.deleteMany()
+  await db.orderItem.deleteMany()
+  await db.order.deleteMany()
+  await db.cashSession.deleteMany()
+  await db.client.deleteMany()
+  await db.table.deleteMany()
+  await db.product.deleteMany()
+  await db.user.deleteMany()
+  await db.restaurant.deleteMany()
+  console.log('✅ Database cleared\n')
 
-  const r1 = restaurants[0].id
-  const r2 = restaurants[1].id
+  // ═══════════════════════════════════════════════════════════
+  // RESTAURANT
+  // ═══════════════════════════════════════════════════════════
+  const restaurant = await db.restaurant.create({
+    data: {
+      name: 'La Carta de Sevilla',
+      slug: 'la-carta-de-sevilla',
+      address: 'Calle Betis 42, Triana, Sevilla',
+      phone: '954 123 456',
+      subscriptionStatus: 'active',
+      active: true,
+    },
+  })
+  const r1 = restaurant.id
+  console.log(`✅ Restaurante: ${restaurant.name} (${restaurant.slug})`)
 
-  // ─── USUARIOS (upsert para idempotencia) ───────
+  // ═══════════════════════════════════════════════════════════
+  // USUARIOS
+  // ═══════════════════════════════════════════════════════════
+  // ── Passwords ──────────────────────────────────────────────
+  const PW_SUPER  = 'Super2024!'   // super_admin
+  const PW_ADMIN  = 'Admin2024!'   // admin del restaurante
+  const PW_STAFF  = 'Sevilla2024!' // resto del personal
+
   const userDefs = [
-    // super_admin: no restaurantId (can see all)
-    { username: 'superadmin', passwordHash: hash('Sup3rAdm1n!2024'), name: 'Super Administrador', role: 'super_admin', restaurantId: null },
-    // Restaurant 1 users
-    { username: 'admin', passwordHash: hash('Adm1n!2024'), name: 'Administrador', role: 'admin', restaurantId: r1 },
-    { username: 'encargado', passwordHash: hash('Enc4rg4d0!2024'), name: 'Encargado', role: 'encargado', restaurantId: r1 },
-    { username: 'camarero1', passwordHash: hash('C4m4r3r0!2024'), name: 'Camarero 1', role: 'camarero', restaurantId: r1 },
-    { username: 'camarero2', passwordHash: hash('C4m4r3r0!2024'), name: 'Camarero 2', role: 'camarero', restaurantId: r1 },
-    { username: 'cocina1', passwordHash: hash('C0c1n4!2024'), name: 'Cocina 1', role: 'cocina', restaurantId: r1 },
-    { username: 'caja1', passwordHash: hash('C4j4!2024'), name: 'Caja 1', role: 'caja', restaurantId: r1 },
-    // Restaurant 2 users
-    { username: 'admin2', passwordHash: hash('Adm1n2!2024'), name: 'Administrador R2', role: 'admin', restaurantId: r2 },
-    { username: 'camarero3', passwordHash: hash('C4m4r3r0!2024'), name: 'Camarero R2', role: 'camarero', restaurantId: r2 },
-    { username: 'cocina2', passwordHash: hash('C0c1n4!2024'), name: 'Cocina R2', role: 'cocina', restaurantId: r2 },
-    { username: 'caja2', passwordHash: hash('C4j4!2024'), name: 'Caja R2', role: 'caja', restaurantId: r2 },
+    // super_admin: acceso total, sin restaurante (ve todo)
+    {
+      username: 'superadmin',
+      passwordHash: hash(PW_SUPER),
+      name: 'Super Administrador',
+      role: 'super_admin',
+      active: true,
+      mustChangePassword: false,
+      zone: null,
+      restaurantId: null,
+    },
+    // admin: creado por super_admin al hacer onboarding
+    {
+      username: 'admin',
+      passwordHash: hash(PW_ADMIN),
+      name: 'Antonio Reyes — Administrador',
+      role: 'admin',
+      active: true,
+      mustChangePassword: true, // debe cambiar contraseña al primer login
+      zone: null,
+      restaurantId: r1,
+    },
+    // ── Personal creado por el admin ────────────────────────
+    // Camareros con zona asignada
+    {
+      username: 'camarero_terraza',
+      passwordHash: hash(PW_STAFF),
+      name: 'María Solís — Camarera Terraza',
+      role: 'camarero',
+      active: true,
+      mustChangePassword: true,
+      zone: 'terrace',
+      restaurantId: r1,
+    },
+    {
+      username: 'camarero_sala',
+      passwordHash: hash(PW_STAFF),
+      name: 'Javier Moreno — Camarero Salón',
+      role: 'camarero',
+      active: true,
+      mustChangePassword: true,
+      zone: 'main',
+      restaurantId: r1,
+    },
+    {
+      username: 'camarero_barra',
+      passwordHash: hash(PW_STAFF),
+      name: 'Lucía Prieto — Camarera Barra',
+      role: 'camarero',
+      active: true,
+      mustChangePassword: true,
+      zone: 'bar',
+      restaurantId: r1,
+    },
+    // Cocina
+    {
+      username: 'cocinero',
+      passwordHash: hash(PW_STAFF),
+      name: 'Carlos Herrera — Cocinero Jefe',
+      role: 'cocina',
+      active: true,
+      mustChangePassword: true,
+      zone: null,
+      restaurantId: r1,
+    },
+    // Encargado: reportes, caja, usuarios, auditoría
+    {
+      username: 'encargado',
+      passwordHash: hash(PW_STAFF),
+      name: 'Rosa Delgado — Encargada',
+      role: 'encargado',
+      active: true,
+      mustChangePassword: true,
+      zone: null,
+      restaurantId: r1,
+    },
+    // Caja
+    {
+      username: 'caja',
+      passwordHash: hash(PW_STAFF),
+      name: 'Pedro Naranjo — Caja',
+      role: 'caja',
+      active: true,
+      mustChangePassword: true,
+      zone: null,
+      restaurantId: r1,
+    },
   ]
 
-  const users = []
+  const users: Record<string, string> = {}
   for (const u of userDefs) {
-    const user = await db.user.upsert({
-      where: { username: u.username },
-      update: { passwordHash: u.passwordHash, name: u.name, role: u.role, restaurantId: u.restaurantId },
-      create: u as any,
-    })
-    users.push(user)
+    const user = await db.user.create({ data: u })
+    users[u.username] = user.id
   }
-  console.log(`✅ ${users.length} usuarios creados/actualizados`)
+  console.log(`✅ ${userDefs.length} usuarios creados`)
 
-  // ─── PRODUCTOS: RESTAURANT 1 (La Carta de Sevilla) ──────
-  const bebidasData = [
-    { name: 'Caña de Cruzcampo', description: 'Cerveza rubia de barril', price: 1.50, category: 'bebida', stock: 200, restaurantId: r1 },
-    { name: 'Copa de Manzanilla', description: 'Manzanilla sanluqueña', price: 1.80, category: 'bebida', stock: 100, restaurantId: r1 },
-    { name: 'Tinto de Verano', description: 'Vino tinto con casera y hielo', price: 2.50, category: 'bebida', stock: 80, restaurantId: r1 },
-    { name: 'Refresco', description: 'Coca-Cola, Fanta, Sprite', price: 2.00, category: 'bebida', stock: 150, restaurantId: r1 },
-    { name: 'Botella de Agua', description: 'Agua mineral 50cl', price: 1.50, category: 'bebida', stock: 120, restaurantId: r1 },
+  // ═══════════════════════════════════════════════════════════
+  // CARTA TRADICIONAL SEVILLANA
+  // ═══════════════════════════════════════════════════════════
+
+  // ── BEBIDAS ────────────────────────────────────────────────
+  const bebidas = [
+    { name: 'Caña de Cruzcampo', description: 'Cerveza rubia de barril, bien tirada', price: 1.50, category: 'bebida', stock: 300 },
+    { name: 'Doble de Cruzcampo', description: 'Cerveza rubia doble de barril', price: 2.50, category: 'bebida', stock: 200 },
+    { name: 'Copa de Manzanilla', description: 'Manzanilla sanluqueña en copa', price: 1.80, category: 'bebida', stock: 120 },
+    { name: 'Copa de Fino', description: 'Fino de Jerez Tío Pepe', price: 1.80, category: 'bebida', stock: 120 },
+    { name: 'Copa de Oloroso', description: 'Vino oloroso de Jerez', price: 2.20, category: 'bebida', stock: 80 },
+    { name: 'Tinto de Verano', description: 'Vino tinto con casera y hielo', price: 2.50, category: 'bebida', stock: 100 },
+    { name: 'Sangría Casera', description: 'Sangría de la casa con fruta', price: 3.50, category: 'bebida', stock: 60 },
+    { name: 'Rebujito', description: 'Manzanilla con 7Up y menta', price: 3.00, category: 'bebida', stock: 80 },
+    { name: 'Copa de Vino Tinto', description: 'Vino tinto de la tierra', price: 2.00, category: 'bebida', stock: 100 },
+    { name: 'Copa de Vino Blanco', description: 'Vino blanco joven', price: 2.00, category: 'bebida', stock: 80 },
+    { name: 'Refresco', description: 'Coca-Cola, Fanta, Sprite, Nestea', price: 2.00, category: 'bebida', stock: 200 },
+    { name: 'Zumo Natural', description: 'Zumo de naranja recién exprimido', price: 2.50, category: 'bebida', stock: 50 },
+    { name: 'Botella de Agua', description: 'Agua mineral 50cl', price: 1.50, category: 'bebida', stock: 150 },
+    { name: 'Café', description: 'Café solo o con leche', price: 1.30, category: 'bebida', stock: 200 },
+    { name: 'Carajillo', description: 'Café con brandy o ron', price: 2.00, category: 'bebida', stock: 100 },
   ]
 
-  const tapasFriasData = [
-    { name: 'Ensaladilla Rusa con picos de Triana', description: 'Ensaladilla casera con picos crujientes', price: 3.50, category: 'tapa_fria', stock: 40, restaurantId: r1 },
-    { name: 'Aliño de Papas con Melva', description: 'Papas aliñadas con melva canutera', price: 3.80, category: 'tapa_fria', stock: 35, restaurantId: r1 },
-    { name: 'Queso Viejo de Oveja', description: 'Queso curado de oveja con aceite', price: 4.00, category: 'tapa_fria', stock: 30, restaurantId: r1 },
+  // ── TAPAS FRÍAS ────────────────────────────────────────────
+  const tapasFrias = [
+    { name: 'Ensaladilla Rusa', description: 'Ensaladilla casera con picos de Triana', price: 3.50, category: 'tapa_fria', stock: 40 },
+    { name: 'Aliño de Papas con Melva', description: 'Papas aliñadas con melva canutera y cebolleta', price: 3.80, category: 'tapa_fria', stock: 35 },
+    { name: 'Queso Viejo de Oveja', description: 'Queso curado de oveja con aceite de oliva virgen extra', price: 4.00, category: 'tapa_fria', stock: 30 },
+    { name: 'Jamón Ibérico de Bellota (tapa)', description: 'Jamón ibérico de bellota cortado a cuchillo', price: 8.50, category: 'tapa_fria', stock: 20 },
+    { name: 'Lomo Ibérico en Manteca', description: 'Lomo de cerdo ibérico en manteca colorá', price: 3.80, category: 'tapa_fria', stock: 30 },
+    { name: 'Salmorejo', description: 'Salmorejo cordobés con huevo y jamón', price: 4.50, category: 'tapa_fria', stock: 35 },
+    { name: 'Gazpacho Andaluz', description: 'Gazpacho fresco de tomate, pepino y pimiento', price: 3.50, category: 'tapa_fria', stock: 40 },
+    { name: 'Ajoblanco', description: 'Sopa fría de almendras con uvas', price: 3.50, category: 'tapa_fria', stock: 25 },
   ]
 
-  const tapasCalientesData = [
-    { name: 'Solomillo al Whisky', description: 'Solomillo de cerdo flambéado al whisky', price: 4.50, category: 'tapa_caliente', stock: 30, restaurantId: r1 },
-    { name: 'Carrillada Ibérica al vino tinto', description: 'Carrillada estofada lentamente', price: 4.80, category: 'tapa_caliente', stock: 25, restaurantId: r1 },
-    { name: 'Espinacas con Garbanzos', description: 'Espinacas salteadas con garbanzos y comino', price: 4.00, category: 'tapa_caliente', stock: 35, restaurantId: r1 },
-    { name: 'Pavía de Bacalao', description: 'Bacalao rebozado frito crujiente', price: 3.50, category: 'tapa_caliente', stock: 30, restaurantId: r1 },
+  // ── TAPAS CALIENTES ────────────────────────────────────────
+  const tapasCalientes = [
+    { name: 'Solomillo al Whisky', description: 'Solomillo de cerdo flambéado al whisky', price: 4.50, category: 'tapa_caliente', stock: 30 },
+    { name: 'Carrillada Ibérica al Vino Tinto', description: 'Carrillada estofada lentamente al vino tinto', price: 4.80, category: 'tapa_caliente', stock: 25 },
+    { name: 'Espinacas con Garbanzos', description: 'Espinacas salteadas con garbanzos y comino', price: 4.00, category: 'tapa_caliente', stock: 35 },
+    { name: 'Pavía de Bacalao', description: 'Bacalao rebozado frito crujiente', price: 3.50, category: 'tapa_caliente', stock: 30 },
+    { name: 'Croqueta de Jamón Ibérico', description: 'Croqueta casera cremosa de jamón ibérico', price: 3.00, category: 'tapa_caliente', stock: 50 },
+    { name: 'Tortilla de Patatas', description: 'Tortilla española jugosa, al punto', price: 3.50, category: 'tapa_caliente', stock: 40 },
+    { name: 'Choco Frito', description: 'Chocos fritos con limón', price: 4.00, category: 'tapa_caliente', stock: 25 },
+    { name: 'Huevos a la Flamenca', description: 'Huevos fritos sobre pisto con jamón y patatas', price: 4.50, category: 'tapa_caliente', stock: 20 },
+    { name: 'Punta de Solomillo al Pedro Ximénez', description: 'Punta de solomillo con reducción de PX', price: 5.50, category: 'tapa_caliente', stock: 20 },
   ]
 
-  const montaditosData = [
-    { name: 'Montadito de Pringá', description: 'Pan con pringá de cocido', price: 3.00, category: 'montadito', stock: 40, restaurantId: r1 },
-    { name: 'Serranito de lomo y jamón', description: 'Lomo, jamón serrano y pimiento frito', price: 4.50, category: 'montadito', stock: 30, restaurantId: r1 },
-    { name: 'Piripi', description: 'Pan con pringá, jamón y huevo', price: 3.50, category: 'montadito', stock: 35, restaurantId: r1 },
+  // ── MONTADITOS ─────────────────────────────────────────────
+  const montaditos = [
+    { name: 'Montadito de Pringá', description: 'Pan de pueblo con pringá de cocido', price: 3.00, category: 'montadito', stock: 40 },
+    { name: 'Serranito', description: 'Lomo, jamón serrano y pimiento frito en pan de mollas', price: 4.50, category: 'montadito', stock: 30 },
+    { name: 'Piripi', description: 'Pan con pringá, jamón y huevo frito', price: 3.50, category: 'montadito', stock: 35 },
+    { name: 'Montadito de Chicharrones', description: 'Chicharrones calientes en pan de Sevilla', price: 2.80, category: 'montadito', stock: 40 },
+    { name: 'Cateto', description: 'Pan con jamón, queso y tomate rallado', price: 3.20, category: 'montadito', stock: 35 },
+    { name: 'Montadito de Bacalao', description: 'Bacalao frito con alioli en pan', price: 3.50, category: 'montadito', stock: 30 },
   ]
 
-  const racionesData = [
-    { name: 'Ración de Adobo', description: 'Adobo de choco frito', price: 9.00, category: 'racion', stock: 20, restaurantId: r1 },
-    { name: 'Ración de Croquetas Caseras', description: 'Croquetas de jamón ibérico', price: 10.00, category: 'racion', stock: 20, restaurantId: r1 },
-    { name: 'Jamón Ibérico de Bellota', description: 'Jamón ibérico de bellota cortado a cuchillo', price: 18.00, category: 'racion', stock: 15, restaurantId: r1 },
+  // ── RACIONES ───────────────────────────────────────────────
+  const raciones = [
+    { name: 'Ración de Adobo', description: 'Adobo de choco frito con limón', price: 9.00, category: 'racion', stock: 20 },
+    { name: 'Ración de Croquetas Caseras', description: 'Croquetas de jamón ibérico (8 unidades)', price: 10.00, category: 'racion', stock: 20 },
+    { name: 'Jamón Ibérico de Bellota (ración)', description: 'Jamón ibérico de bellota cortado a cuchillo, ración completa', price: 18.00, category: 'racion', stock: 15 },
+    { name: 'Ración de Pescaíto Frito', description: 'Variado de pescaíto frito: chanquetes, boquerones, salmonetes', price: 12.00, category: 'racion', stock: 15 },
+    { name: 'Ración de Gambas al Ajillo', description: 'Gambas en aceite de oliva con ajo laminado y guindilla', price: 11.00, category: 'racion', stock: 18 },
+    { name: 'Ración de Solomillo al Whisky', description: 'Solomillo de cerdo flambéado al whisky con patatas', price: 14.00, category: 'racion', stock: 15 },
+    // ★ PLATOS ESPECIALES ★
+    { name: 'Arroz Meloso de Carrillada Ibérica', description: '★ ESPECIAL ★ Arroz meloso con carrillada ibérica deshecha y reducción de su jugo', price: 16.00, category: 'racion', stock: 12 },
+    { name: 'Presa Ibérica con Salsa de Vino Oloroso', description: '★ ESPECIAL ★ Presa ibérica a la brasa con salsa de vino oloroso y patatas panaderas', price: 18.00, category: 'racion', stock: 10 },
   ]
 
-  // ─── PRODUCTOS: RESTAURANT 2 (Taberna del Puerto) ──────
-  const bebidasR2 = [
-    { name: 'Caña de Cruzcampo', description: 'Cerveza rubia de barril', price: 1.60, category: 'bebida', stock: 150, restaurantId: r2 },
-    { name: 'Copa de Vino Fino', description: 'Fino de Jerez', price: 2.00, category: 'bebida', stock: 80, restaurantId: r2 },
-    { name: 'Refresco', description: 'Coca-Cola, Fanta, Sprite', price: 2.20, category: 'bebida', stock: 100, restaurantId: r2 },
+  // ── POSTRES ────────────────────────────────────────────────
+  const postres = [
+    { name: 'Tocino de Cielo', description: 'Tocino de cielo de Jerez, dulce tradicional', price: 3.00, category: 'postre', stock: 25 },
+    { name: 'Flan de Huevo Casero', description: 'Flan de huevo tradicional con caramelo', price: 3.00, category: 'postre', stock: 25 },
+    { name: 'Arroz con Leche', description: 'Arroz con leche casero con canela', price: 3.50, category: 'postre', stock: 20 },
+    { name: 'Torrijas', description: 'Torrija andaluza con miel y canela (temporada)', price: 3.50, category: 'postre', stock: 15 },
+    { name: 'Queso con Membrillo', description: 'Queso manchego con dulce de membrillo', price: 4.00, category: 'postre', stock: 20 },
+    { name: 'Helado de Nata y Canela', description: 'Helado artesanal de nata con canela de Sri Lanka', price: 3.50, category: 'postre', stock: 30 },
   ]
 
-  const tapasCalientesR2 = [
-    { name: 'Pescaíto Frito', description: 'Variado de pescado frito', price: 6.00, category: 'tapa_caliente', stock: 30, restaurantId: r2 },
-    { name: 'Gambas al Ajillo', description: 'Gambas en aceite de oliva con ajo', price: 5.50, category: 'tapa_caliente', stock: 25, restaurantId: r2 },
-  ]
-
-  const allProductData = [
-    ...bebidasData, ...tapasFriasData, ...tapasCalientesData,
-    ...montaditosData, ...racionesData,
-    ...bebidasR2, ...tapasCalientesR2,
+  // ── CREAR TODOS LOS PRODUCTOS ─────────────────────────────
+  const allProducts = [
+    ...bebidas.map(p => ({ ...p, restaurantId: r1 })),
+    ...tapasFrias.map(p => ({ ...p, restaurantId: r1 })),
+    ...tapasCalientes.map(p => ({ ...p, restaurantId: r1 })),
+    ...montaditos.map(p => ({ ...p, restaurantId: r1 })),
+    ...raciones.map(p => ({ ...p, restaurantId: r1 })),
+    ...postres.map(p => ({ ...p, restaurantId: r1 })),
   ]
 
   let productCount = 0
-  for (const pData of allProductData) {
-    try {
-      await db.product.create({ data: pData })
-      productCount++
-    } catch { /* skip if exists */ }
+  for (const pData of allProducts) {
+    await db.product.create({ data: pData })
+    productCount++
   }
   console.log(`✅ ${productCount} productos creados`)
+  console.log(`   🍹 ${bebidas.length} bebidas`)
+  console.log(`   🥗 ${tapasFrias.length} tapas frías`)
+  console.log(`   🍳 ${tapasCalientes.length} tapas calientes`)
+  console.log(`   🥪 ${montaditos.length} montaditos`)
+  console.log(`   🍽️  ${raciones.length} raciones (incl. 2 especiales)`)
+  console.log(`   🍰 ${postres.length} postres`)
 
-  // ─── MESAS POR ZONA - Restaurant 1 ─────────────────────
+  // ═══════════════════════════════════════════════════════════
+  // MESAS POR ZONA
+  // ═══════════════════════════════════════════════════════════
+  // Barra: mesas 1-6 (capacidad 2)
+  // Salón (main): mesas 11-24 (capacidad 4)
+  // Terraza: mesas 31-44 (capacidad 4)
+
+  const tablesData = [
+    // Barra (6 mesas)
+    ...Array.from({ length: 6 }, (_, i) => ({
+      number: i + 1, capacity: 2, zone: 'bar' as const, restaurantId: r1,
+    })),
+    // Salón (14 mesas)
+    ...Array.from({ length: 14 }, (_, i) => ({
+      number: i + 11, capacity: 4, zone: 'main' as const, restaurantId: r1,
+    })),
+    // Terraza (14 mesas)
+    ...Array.from({ length: 14 }, (_, i) => ({
+      number: i + 31, capacity: 4, zone: 'terrace' as const, restaurantId: r1,
+    })),
+  ]
+
   let tableCount = 0
-  for (let i = 1; i <= 25; i++) {
-    try {
-      const zone = i <= 5 ? 'bar' : i <= 15 ? 'main' : 'terrace'
-      const capacity = i <= 5 ? 2 : 4
-      await db.table.create({ data: { number: i, capacity, zone, restaurantId: r1 } })
-      tableCount++
-    } catch { /* skip if exists */ }
-  }
-
-  // ─── MESAS POR ZONA - Restaurant 2 ─────────────────────
-  for (let i = 1; i <= 15; i++) {
-    try {
-      const zone = i <= 5 ? 'bar' : i <= 10 ? 'main' : 'terrace'
-      const capacity = i <= 5 ? 2 : 4
-      await db.table.create({ data: { number: i, capacity, zone, restaurantId: r2 } })
-      tableCount++
-    } catch { /* skip if exists */ }
+  for (const tData of tablesData) {
+    await db.table.create({ data: tData })
+    tableCount++
   }
   console.log(`✅ ${tableCount} mesas creadas`)
+  console.log(`   🪑 Barra: 6 mesas (1-6)`)
+  console.log(`   🪑 Salón: 14 mesas (11-24)`)
+  console.log(`   🪑 Terraza: 14 mesas (31-44)`)
 
-  // ─── CLIENTES DE EJEMPLO (CRM) - Restaurant 1 ──────────
+  // ═══════════════════════════════════════════════════════════
+  // CLIENTES DE EJEMPLO (CRM)
+  // ═══════════════════════════════════════════════════════════
   const clientsData = [
-    { name: 'Antonio Fernández', phone: '654123456', email: 'antonio@email.com', points: 45, visits: 12, restaurantId: r1 },
-    { name: 'María del Carmen Ruiz', phone: '666789012', email: 'mariacarmen@email.com', points: 120, visits: 28, restaurantId: r1 },
-    { name: 'José Manuel García', phone: '678345678', email: 'josema@email.com', points: 8, visits: 3, restaurantId: r1 },
+    { name: 'Antonio Fernández García', phone: '654 123 456', email: 'antonio.fg@email.com', points: 45, visits: 12 },
+    { name: 'María del Carmen Ruiz Torres', phone: '666 789 012', email: 'mariacarmen.rt@email.com', points: 120, visits: 28 },
+    { name: 'José Manuel García Vega', phone: '678 345 678', email: 'josema.gv@email.com', points: 8, visits: 3 },
+    { name: 'Isabel Pardo Molina', phone: '612 987 654', email: 'isabel.pm@email.com', points: 65, visits: 16 },
+    { name: 'Francisco Javier León Soto', phone: '699 111 222', email: 'franjavier.ls@email.com', points: 200, visits: 42 },
   ]
-  const clients = await Promise.all(
-    clientsData.map(c => db.client.upsert({
-      where: { phone_restaurantId: { phone: c.phone, restaurantId: c.restaurantId } },
-      update: { name: c.name, email: c.email, points: c.points, visits: c.visits },
-      create: c,
-    }))
-  )
 
-  // ─── CLIENTES DE EJEMPLO (CRM) - Restaurant 2 ──────────
-  const clientsR2 = [
-    { name: 'Pedro López', phone: '612345678', email: 'pedro@email.com', points: 20, visits: 5, restaurantId: r2 },
-    { name: 'Laura Martín', phone: '698765432', email: 'laura@email.com', points: 75, visits: 15, restaurantId: r2 },
-  ]
-  const clients2 = await Promise.all(
-    clientsR2.map(c => db.client.upsert({
-      where: { phone_restaurantId: { phone: c.phone, restaurantId: c.restaurantId } },
-      update: { name: c.name, email: c.email, points: c.points, visits: c.visits },
-      create: c,
-    }))
-  )
-  console.log(`✅ ${clients.length + clients2.length} clientes de ejemplo creados`)
+  const clients = []
+  for (const c of clientsData) {
+    const client = await db.client.create({
+      data: { ...c, restaurantId: r1 },
+    })
+    clients.push(client)
+  }
+  console.log(`✅ ${clients.length} clientes de ejemplo creados`)
 
-  console.log('\n🎉 Seed completado. Multi-restaurante listo!')
-  console.log(`   ${restaurants.length} restaurantes | ${users.length} usuarios | ${productCount} productos | ${tableCount} mesas | ${clients.length + clients2.length} clientes`)
-  console.log(`\n   Restaurant 1: ${restaurants[0].name} (slug: ${restaurants[0].slug})`)
-  console.log(`   Restaurant 2: ${restaurants[1].name} (slug: ${restaurants[1].slug})`)
+  // ═══════════════════════════════════════════════════════════
+  // RESUMEN FINAL
+  // ═══════════════════════════════════════════════════════════
+  console.log('\n' + '═'.repeat(60))
+  console.log('🎉  SEED COMPLETADO — DATOS REALES DE RESTAURANTOS')
+  console.log('═'.repeat(60))
+  console.log(`\n  📍 Restaurante: ${restaurant.name}`)
+  console.log(`     ${restaurant.address}`)
+  console.log(`     Tel: ${restaurant.phone}\n`)
+  console.log('  🔑 CREDENCIALES DE ACCESO:')
+  console.log('  ─────────────────────────────────────────────')
+  console.log(`  👑 super_admin   │ user: superadmin        │ pass: ${PW_SUPER}`)
+  console.log(`  🏢 admin         │ user: admin             │ pass: ${PW_ADMIN}`)
+  console.log(`  🍽️  camarero_terraza │ user: camarero_terraza │ pass: ${PW_STAFF}`)
+  console.log(`  🍽️  camarero_sala   │ user: camarero_sala    │ pass: ${PW_STAFF}`)
+  console.log(`  🍽️  camarero_barra  │ user: camarero_barra   │ pass: ${PW_STAFF}`)
+  console.log(`  👨‍🍳 cocinero      │ user: cocinero          │ pass: ${PW_STAFF}`)
+  console.log(`  📊 encargado     │ user: encargado          │ pass: ${PW_STAFF}`)
+  console.log(`  💰 caja          │ user: caja               │ pass: ${PW_STAFF}`)
+  console.log('  ─────────────────────────────────────────────')
+  console.log('\n  📋 PERMISOS POR ZONA:')
+  console.log('  ─────────────────────────────────────────────')
+  console.log('  camarero_terraza → Solo TERRAZA (mesas 31-44)')
+  console.log('  camarero_sala    → Solo SALÓN (mesas 11-24)')
+  console.log('  camarero_barra   → Solo BARRA (mesas 1-6)')
+  console.log('  cocinero         → Cocina/KDS (todos los pedidos)')
+  console.log('  encargado        → Reportes, Caja, Usuarios, Auditoría')
+  console.log('  caja             → Cobros y sesiones de caja')
+  console.log('  ─────────────────────────────────────────────')
+  console.log('\n  ⭐ PLATOS ESPECIALES:')
+  console.log('  ─────────────────────────────────────────────')
+  console.log('  ★ Arroz Meloso de Carrillada Ibérica — 16,00 €')
+  console.log('  ★ Presa Ibérica con Salsa de Vino Oloroso — 18,00 €')
+  console.log('═'.repeat(60))
 }
 
 seed()

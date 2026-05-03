@@ -7,7 +7,7 @@
 
 import { db } from '@/lib/db'
 import { NextResponse } from 'next/server'
-import { authenticateAndAuthorize, requireRestaurantScope, requireActiveSubscription } from '@/lib/auth'
+import { authenticateAndAuthorize, requireRestaurantScope, requireActiveSubscription, getZoneFilter } from '@/lib/auth'
 import { validateInput, createOrderSchema } from '@/lib/validations'
 import { createAuditLog } from '@/lib/audit'
 import { handleApiError } from '@/lib/errors'
@@ -47,6 +47,12 @@ export async function GET(request: Request) {
 
     if (clientId) {
       where.clientId = clientId
+    }
+
+    // Zone filtering for camareros: only see orders from tables in their zone
+    const userZone = getZoneFilter(user)
+    if (userZone) {
+      where.table = { zone: userZone }
     }
 
     const orders = await db.order.findMany({
