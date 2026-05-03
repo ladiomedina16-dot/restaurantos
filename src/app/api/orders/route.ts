@@ -24,7 +24,12 @@ export async function GET(request: Request) {
     const where: Record<string, unknown> = {}
 
     if (status) {
-      where.status = status
+      // Support comma-separated statuses for kitchen KDS
+      if (status.includes(',')) {
+        where.status = { in: status.split(',') }
+      } else {
+        where.status = status
+      }
     }
 
     if (tableId) {
@@ -122,13 +127,13 @@ export async function POST(request: Request) {
       }
       if (product.stock < item.quantity) {
         return NextResponse.json(
-          { error: `Insufficient stock for "${product.name}". Available: ${product.stock}, Requested: ${item.quantity}` },
+          { error: `Sin stock: "${product.name}". Disponible: ${product.stock}, Pedido: ${item.quantity}` },
           { status: 400 }
         )
       }
     }
 
-    // Calculate subtotals and total
+    // Calculate subtotals and subtotal (before discount)
     const orderItemsData = items.map((item) => {
       const product = productMap.get(item.productId)!
       const unitPrice = product.price
@@ -142,17 +147,20 @@ export async function POST(request: Request) {
       }
     })
 
-    const total = orderItemsData.reduce((sum, item) => sum + item.subtotal, 0)
+    const subtotal = orderItemsData.reduce((sum, item) => sum + item.subtotal, 0)
 
     // Use transaction to ensure atomicity
     const order = await db.$transaction(async (tx) => {
-      // Create the order with items
+      // Create the order with items (discount = 0 initially, applied at payment)
       const newOrder = await tx.order.create({
         data: {
           tableId,
           clientId: clientId ?? null,
           notes: notes ?? '',
-          total,
+          subtotal,
+          discount: 0,
+          total: subtotal,
+          status: 'pending',
           items: {
             create: orderItemsData,
           },
@@ -182,14 +190,13 @@ export async function POST(request: Request) {
         data: { status: 'occupied' },
       })
 
-      // If clientId provided, increment visits and add loyalty points (1 point per euro spent)
+      // If clientId provided, increment visits
+      // Points are added at payment (caja), not at order creation
       if (clientId) {
-        const pointsToAdd = Math.floor(total)
         await tx.client.update({
           where: { id: clientId },
           data: {
             visits: { increment: 1 },
-            points: { increment: pointsToAdd },
           },
         })
       }

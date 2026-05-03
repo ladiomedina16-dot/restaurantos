@@ -79,3 +79,53 @@ Stage Summary:
 - All CRUD operations connected to API
 - Real-time events via Socket.io
 - Lint passes with zero errors
+
+---
+Task ID: 4-6
+Agent: full-stack-developer
+Task: Build 3 Main Operational Screens (Camarero, Cocina, Caja)
+
+Work Log:
+- Completely replaced /src/app/page.tsx with new version containing 3 main operational screens
+- CamareroTab: Table grid by zone → menu with category tabs → order with +/- buttons → "Enviar a Cocina"
+- CocinaTab: Dark KDS with large order cards, elapsed time, TERMINAR button, real-time socket updates
+- CajaTab: Table overview with pulse on ready orders → payment panel with 5ª GRATIS discount logic
+- Admin stubs for Dashboard, Products, Tables, Orders, Clients
+- Tab navigation: 3 main tabs prominent, 5 admin tabs in secondary row
+- Fixed ESLint error: renamed € function to formatEUR
+- All touch targets min 48px (h-12)
+- Socket.io: proper room joining (kitchen, caja), all events wired
+- Lint passes with zero errors
+- Dev server compiles successfully
+
+Stage Summary:
+- 3 main operational screens fully implemented (Camarero, Cocina, Caja)
+- Real-time updates via Socket.io on all screens
+- 5ª GRATIS loyalty discount logic implemented in Caja
+- KDS with dark theme and elapsed time tracking
+- Touch-friendly waiter interface with large buttons
+
+---
+Task ID: Phase 2
+Agent: main
+Task: Add 3 specialized screens (Camarero/Cocina/Caja) with Sevilla menu seed
+
+Work Log:
+- Updated Prisma schema: added `subtotal` and `discount` fields to Order model
+- Created prisma/seed.ts with La Carta de Sevilla (18 products, 25 tables, 3 clients)
+- Seed data: 5 Bebidas, 3 Tapas Frías, 4 Tapas Calientes, 3 Montaditos, 3 Raciones
+- Tables: 5 Barra, 10 Salón, 10 Terraza
+- Updated Socket.io server: added `order-ready` and `table-cleared` events, added `caja` room
+- Created /api/orders/[id]/pay endpoint with 5ª GRATIS logic and CRM points
+- Updated /api/orders GET to support comma-separated status filter
+- Updated /api/orders POST to save subtotal/discount fields
+- Rebuilt page.tsx with 3 main operational tabs + admin stubs
+- Updated store.ts with new TabId union type and order management state
+
+Stage Summary:
+- 3 specialized screens: Camarero (tablet waiter), Cocina (KDS dark mode), Caja (cash register)
+- Real-time flow: Camarero→order-created→Cocina→order-ready→Caja→table-cleared
+- 5ª GRATIS: every 5 bebidas = 1.50€ discount (only with client)
+- CRM: 1€ = 1 punto, applied at payment
+- La Carta de Sevilla fully seeded (18 products, 25 mesas)
+- Lint passes, dev server 200 OK

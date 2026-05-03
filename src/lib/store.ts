@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 
-export type TabId = 'dashboard' | 'products' | 'tables' | 'orders' | 'clients'
+export type TabId = 'camarero' | 'cocina' | 'caja' | 'dashboard' | 'products' | 'tables' | 'orders' | 'clients'
 
 export interface Notification {
   id: string
@@ -15,6 +15,7 @@ export interface OrderItem {
   price: number
   quantity: number
   notes: string
+  category?: string
 }
 
 interface RestaurantStore {
@@ -31,17 +32,24 @@ interface RestaurantStore {
   realtimeConnected: boolean
   setRealtimeConnected: (connected: boolean) => void
 
-  // Current order being edited
+  // Current order being edited (camarero)
   currentOrderItems: OrderItem[]
+  selectedTableId: string
+  selectedClientId: string
+  orderNotes: string
   addOrderItem: (item: OrderItem) => void
   removeOrderItem: (productId: string) => void
   updateOrderItemQuantity: (productId: string, quantity: number) => void
   clearOrderItems: () => void
+  setSelectedTableId: (id: string) => void
+  setSelectedClientId: (id: string) => void
+  setOrderNotes: (notes: string) => void
+  resetOrder: () => void
 }
 
 export const useRestaurantStore = create<RestaurantStore>((set) => ({
-  // Active tab
-  activeTab: 'dashboard',
+  // Active tab - default to camarero (main screen)
+  activeTab: 'camarero',
   setActiveTab: (tab) => set({ activeTab: tab }),
 
   // Real-time notifications
@@ -55,7 +63,7 @@ export const useRestaurantStore = create<RestaurantStore>((set) => ({
           timestamp: new Date().toISOString(),
         },
         ...state.notifications,
-      ].slice(0, 50), // Keep max 50 notifications
+      ].slice(0, 50),
     })),
   clearNotifications: () => set({ notifications: [] }),
 
@@ -63,8 +71,11 @@ export const useRestaurantStore = create<RestaurantStore>((set) => ({
   realtimeConnected: false,
   setRealtimeConnected: (connected) => set({ realtimeConnected: connected }),
 
-  // Current order being edited
+  // Current order being edited (camarero)
   currentOrderItems: [],
+  selectedTableId: '',
+  selectedClientId: '',
+  orderNotes: '',
   addOrderItem: (item) =>
     set((state) => {
       const existing = state.currentOrderItems.find(
@@ -99,4 +110,8 @@ export const useRestaurantStore = create<RestaurantStore>((set) => ({
             ),
     })),
   clearOrderItems: () => set({ currentOrderItems: [] }),
+  setSelectedTableId: (id) => set({ selectedTableId: id }),
+  setSelectedClientId: (id) => set({ selectedClientId: id }),
+  setOrderNotes: (notes) => set({ orderNotes: notes }),
+  resetOrder: () => set({ currentOrderItems: [], selectedTableId: '', selectedClientId: '', orderNotes: '' }),
 }))

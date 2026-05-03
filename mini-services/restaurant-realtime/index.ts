@@ -46,14 +46,13 @@ io.on('connection', (socket) => {
   })
 
   // ─── PEDIDOS EN TIEMPO REAL ──────────────────────
-  // Cuando un camarero guarda un pedido → cocina lo ve al instante
+  // Camarero crea pedido → cocina y caja lo ven al instante
   socket.on('order-created', (data: OrderEvent) => {
-    console.log(`[Restaurant RT] Order created: ${data.order?.id}`)
-    // Notificar a cocina y admin
+    console.log(`[Restaurant RT] 🍽️ Order created: ${data.order?.id} (Mesa ${data.order?.table?.number ?? '?'})`)
     io.to('kitchen').emit('order-created', data)
     io.to('admin').emit('order-created', data)
-    // Notificar a la sala de barra también
     io.to('bar').emit('order-created', data)
+    io.to('caja').emit('order-created', data)
   })
 
   socket.on('order-updated', (data: OrderEvent) => {
@@ -61,16 +60,36 @@ io.on('connection', (socket) => {
     io.to('kitchen').emit('order-updated', data)
     io.to('admin').emit('order-updated', data)
     io.to('bar').emit('order-updated', data)
+    io.to('caja').emit('order-updated', data)
   })
 
   socket.on('order-status-changed', (data: OrderEvent) => {
-    console.log(`[Restaurant RT] Order status changed: ${data.order?.id} → ${data.order?.status}`)
-    // Cocina ve cambios de estado (ej: "listo para servir")
+    console.log(`[Restaurant RT] Order status: ${data.order?.id} → ${data.order?.status}`)
     io.to('kitchen').emit('order-status-changed', data)
     io.to('admin').emit('order-status-changed', data)
     io.to('bar').emit('order-status-changed', data)
-    // Camareros en sala también
     io.to('floor').emit('order-status-changed', data)
+    io.to('caja').emit('order-status-changed', data)
+  })
+
+  // ─── COCINA TERMINA PEDIDO → Camarero y Caja ─────
+  socket.on('order-ready', (data: { type: string; order: any; tableId: string; timestamp: string }) => {
+    console.log(`[Restaurant RT] ✅ Order READY: ${data.order?.id} (Mesa ${data.order?.table?.number ?? '?'})`)
+    io.to('floor').emit('order-ready', data)
+    io.to('admin').emit('order-ready', data)
+    io.to('bar').emit('order-ready', data)
+    io.to('caja').emit('order-ready', data)
+    io.to('kitchen').emit('order-ready', data)
+  })
+
+  // ─── CAJA LIBERA MESA ────────────────────────────
+  socket.on('table-cleared', (data: { tableId: string; tableNumber: number; timestamp: string }) => {
+    console.log(`[Restaurant RT] 💰 Table cleared: Mesa ${data.tableNumber}`)
+    io.to('admin').emit('table-cleared', data)
+    io.to('floor').emit('table-cleared', data)
+    io.to('bar').emit('table-cleared', data)
+    io.to('caja').emit('table-cleared', data)
+    io.to('kitchen').emit('table-cleared', data)
   })
 
   // ─── MESAS EN TIEMPO REAL ────────────────────────
@@ -79,6 +98,7 @@ io.on('connection', (socket) => {
     io.to('admin').emit('table-status-changed', data)
     io.to('floor').emit('table-status-changed', data)
     io.to('bar').emit('table-status-changed', data)
+    io.to('caja').emit('table-status-changed', data)
   })
 
   // ─── STOCK DE PRODUCTOS ──────────────────────────
@@ -87,6 +107,7 @@ io.on('connection', (socket) => {
     io.to('kitchen').emit('product-stock-updated', data)
     io.to('admin').emit('product-stock-updated', data)
     io.to('bar').emit('product-stock-updated', data)
+    io.to('caja').emit('product-stock-updated', data)
   })
 
   // ─── DESCONEXIÓN ─────────────────────────────────
