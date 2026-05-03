@@ -1,0 +1,98 @@
+// ============================================================
+// RESTAURANT APP - Production Schema
+// Equivalente a Supabase tables + RLS policies
+// ============================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ─── SUPER ADMIN ────────────────────────────────────────────
+// Único usuario con acceso total (equivalente a Supabase Auth + admin role)
+model Admin {
+  id           String   @id @default(cuid())
+  username     String   @unique
+  passwordHash String
+  role         String   @default("super_admin") // solo existe este rol
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+// ─── PRODUCTOS ──────────────────────────────────────────────
+model Product {
+  id          String   @id @default(cuid())
+  name        String
+  description String   @default("")
+  price       Float    // precio en euros
+  category    String   @default("general") // bebida, comida, postre, general
+  stock       Int      @default(0)
+  imageUrl    String   @default("")
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  orderItems  OrderItem[]
+}
+
+// ─── MESAS ──────────────────────────────────────────────────
+model Table {
+  id       String @id @default(cuid())
+  number   Int    @unique
+  capacity Int    @default(4)
+  status   String @default("available") // available, occupied, reserved
+  zone     String @default("main")      // main, terrace, private, bar
+  notes    String @default("")
+  active   Boolean @default(true)
+
+  orders   Order[]
+}
+
+// ─── CLIENTES (CRM) ────────────────────────────────────────
+model Client {
+  id        String   @id @default(cuid())
+  name      String
+  phone     String   @unique
+  email     String   @default("")
+  points    Int      @default(0)      // puntos de fidelidad (ej: la 5ª cerveza gratis)
+  visits    Int      @default(0)
+  notes     String   @default("")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  orders    Order[]
+}
+
+// ─── PEDIDOS ────────────────────────────────────────────────
+model Order {
+  id        String   @id @default(cuid())
+  tableId   String
+  clientId  String?  // puede ser invitado sin registro
+  status    String   @default("pending") // pending, in_progress, ready, served, paid, cancelled
+  total     Float    @default(0)
+  notes     String   @default("")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  table     Table      @relation(fields: [tableId], references: [id])
+  client    Client?    @relation(fields: [clientId], references: [id])
+  items     OrderItem[]
+}
+
+// ─── ITEMS DE PEDIDO ────────────────────────────────────────
+model OrderItem {
+  id        String @id @default(cuid())
+  orderId   String
+  productId String
+  quantity  Int    @default(1)
+  unitPrice Float  // precio al momento del pedido (snapshot)
+  subtotal  Float  // quantity * unitPrice
+  notes     String @default("")
+
+  order     Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product   Product @relation(fields: [productId], references: [id])
+}
