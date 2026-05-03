@@ -1,13 +1,16 @@
 // ============================================================
-// /api/tables/[id] — Single table operations
-// GET    /api/tables/[id]  → Get table (any authenticated user)
-// PUT    /api/tables/[id]  → Update table (requires tables:update)
-// DELETE /api/tables/[id]  → Delete table (requires tables:delete)
+// /api/tables/[id] — Single table operations (multi-restaurant)
+// GET    /api/tables/[id]  → Get table (any authenticated user, scoped to restaurant)
+// PUT    /api/tables/[id]  → Update table (requires tables:update, scoped to restaurant)
+// DELETE /api/tables/[id]  → Delete table (requires tables:delete, scoped to restaurant)
 // ============================================================
 
 import { db } from '@/lib/db'
 import { NextResponse } from 'next/server'
-import { authenticateAndAuthorize, authenticateRequest } from '@/lib/auth'
+import { authenticateAndAuthorize, requireRestaurantScope } from '@/lib/auth'
+import { updateTableSchema, validateInput } from '@/lib/validations'
+import { createAuditLog } from '@/lib/audit'
+import { handleApiError } from '@/lib/errors'
 import { emitTableStatusChanged } from '@/lib/realtime'
 
 // ─── GET /api/tables/[id] ───────────────────────────────────
@@ -16,9 +19,12 @@ export async function GET(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  // Any authenticated user can read a table
-  const auth = authenticateRequest(request)
-  if (!auth.success) return auth.response
+  const auth = authenticateAndAuthorize(request, 'tables:read')
+  if ('error' in auth) return auth.error
+
+  const scope = requireRestaurantScope(auth.user, request)
+  if ('error' in scope) return scope.error
+  const { restaurantId } = scope
 
   try {
     const { id } = await params
@@ -33,7 +39,7 @@ export async function GET(
       },
     })
 
-    if (!table) {
+    if (!table || table.restaurantId !== restaurantId) {
       return NextResponse.json(
         { error: 'Table not found' },
         { status: 404 }
@@ -42,11 +48,7 @@ export async function GET(
 
     return NextResponse.json({ table })
   } catch (error) {
-    console.error('Table GET error:', error)
-    return NextResponse.json(
-      { error: 'Failed to fetch table' },
-      { status: 500 }
-    )
+    return handleApiError('Table GET', error)
   }
 }
 
@@ -59,52 +61,45 @@ export async function PUT(
   const auth = authenticateAndAuthorize(request, 'tables:update')
   if ('error' in auth) return auth.error
 
+  const scope = requireRestaurantScope(auth.user, request)
+  if ('error' in scope) return scope.error
+  const { restaurantId } = scope
+
   try {
     const { id } = await params
     const body = await request.json()
-    const { number, capacity, zone, status, notes, active } = body as {
-      number?: number
-      capacity?: number
-      zone?: string
-      status?: string
-      notes?: string
-      active?: boolean
-    }
+
+    const validation = validateInput(updateTableSchema, body)
+    if (!validation.success) return validation.error
 
     const existing = await db.table.findUnique({ where: { id } })
-    if (!existing) {
+    if (!existing || existing.restaurantId !== restaurantId) {
       return NextResponse.json(
         { error: 'Table not found' },
         { status: 404 }
       )
     }
 
-    // If changing table number, check uniqueness
-    if (number !== undefined && number !== existing.number) {
-      const duplicate = await db.table.findUnique({ where: { number } })
+    // If changing table number, check uniqueness per restaurant
+    if (validation.data.number !== undefined && validation.data.number !== existing.number) {
+      const duplicate = await db.table.findUnique({
+        where: { number_restaurantId: { number: validation.data.number, restaurantId } },
+      })
       if (duplicate) {
         return NextResponse.json(
-          { error: 'Table number already exists' },
+          { error: 'Ya existe una mesa con este número en este restaurante' },
           { status: 409 }
         )
       }
     }
 
-    const validStatuses = ['available', 'occupied', 'reserved']
-    if (status !== undefined && !validStatuses.includes(status)) {
-      return NextResponse.json(
-        { error: `Invalid status. Must be one of: ${validStatuses.join(', ')}` },
-        { status: 400 }
-      )
-    }
-
     const updateData: Record<string, unknown> = {}
-    if (number !== undefined) updateData.number = number
-    if (capacity !== undefined) updateData.capacity = capacity
-    if (zone !== undefined) updateData.zone = zone
-    if (status !== undefined) updateData.status = status
-    if (notes !== undefined) updateData.notes = notes
-    if (active !== undefined) updateData.active = active
+    if (validation.data.number !== undefined) updateData.number = validation.data.number
+    if (validation.data.capacity !== undefined) updateData.capacity = validation.data.capacity
+    if (validation.data.zone !== undefined) updateData.zone = validation.data.zone
+    if (validation.data.status !== undefined) updateData.status = validation.data.status
+    if (validation.data.notes !== undefined) updateData.notes = validation.data.notes
+    if (validation.data.active !== undefined) updateData.active = validation.data.active
 
     const table = await db.table.update({
       where: { id },
@@ -112,17 +107,22 @@ export async function PUT(
     })
 
     // Emit real-time event if status changed
-    if (status !== undefined && status !== existing.status) {
+    if (validation.data.status !== undefined && validation.data.status !== existing.status) {
       await emitTableStatusChanged(table)
     }
 
+    await createAuditLog({
+      restaurantId,
+      userId: auth.user.userId,
+      action: 'table_updated',
+      entityType: 'table',
+      entityId: table.id,
+      details: { updatedFields: Object.keys(updateData), previousStatus: existing.status },
+    })
+
     return NextResponse.json({ table })
   } catch (error) {
-    console.error('Table PUT error:', error)
-    return NextResponse.json(
-      { error: 'Failed to update table' },
-      { status: 500 }
-    )
+    return handleApiError('Table PUT', error)
   }
 }
 
@@ -135,11 +135,15 @@ export async function DELETE(
   const auth = authenticateAndAuthorize(request, 'tables:delete')
   if ('error' in auth) return auth.error
 
+  const scope = requireRestaurantScope(auth.user, request)
+  if ('error' in scope) return scope.error
+  const { restaurantId } = scope
+
   try {
     const { id } = await params
 
     const existing = await db.table.findUnique({ where: { id } })
-    if (!existing) {
+    if (!existing || existing.restaurantId !== restaurantId) {
       return NextResponse.json(
         { error: 'Table not found' },
         { status: 404 }
@@ -152,12 +156,17 @@ export async function DELETE(
       data: { active: false },
     })
 
+    await createAuditLog({
+      restaurantId,
+      userId: auth.user.userId,
+      action: 'table_deleted',
+      entityType: 'table',
+      entityId: table.id,
+      details: { number: table.number, softDelete: true },
+    })
+
     return NextResponse.json({ table })
   } catch (error) {
-    console.error('Table DELETE error:', error)
-    return NextResponse.json(
-      { error: 'Failed to delete table' },
-      { status: 500 }
-    )
+    return handleApiError('Table DELETE', error)
   }
 }

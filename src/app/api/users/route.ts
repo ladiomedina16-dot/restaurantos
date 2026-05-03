@@ -2,11 +2,20 @@
 // /api/users — User management CRUD
 // GET  /api/users       → List users (requires users:read)
 // POST /api/users       → Create user (requires users:create)
+// v4: Multi-restaurant scoping, Zod validation, audit logging
 // ============================================================
 
 import { db } from '@/lib/db'
 import { NextResponse } from 'next/server'
-import { authenticateAndAuthorize, hashPassword, type JwtPayload } from '@/lib/auth'
+import {
+  authenticateAndAuthorize,
+  requireRestaurantScope,
+  hashPassword,
+  type JwtPayload,
+} from '@/lib/auth'
+import { validateInput, createUserSchema } from '@/lib/validations'
+import { handleApiError } from '@/lib/errors'
+import { createAuditLog } from '@/lib/audit'
 
 // ─── GET /api/users ─────────────────────────────────────────
 
@@ -21,6 +30,24 @@ export async function GET(request: Request) {
     const active = searchParams.get('active')
 
     const where: Record<string, unknown> = {}
+
+    // ─── Restaurant scoping ────────────────────────────────
+    if (user.role === 'super_admin') {
+      // super_admin can optionally filter by X-Restaurant-Id header
+      const headerRestaurantId = request.headers.get('X-Restaurant-Id')
+      if (headerRestaurantId) {
+        where.restaurantId = headerRestaurantId
+      }
+      // If no header, super_admin sees all users across restaurants
+    } else {
+      // Non-super_admin: only see users from same restaurant
+      if (user.restaurantId) {
+        where.restaurantId = user.restaurantId
+      } else {
+        // User without restaurant should see nothing
+        return NextResponse.json({ users: [] })
+      }
+    }
 
     if (role) {
       where.role = role
@@ -38,6 +65,7 @@ export async function GET(request: Request) {
         name: true,
         role: true,
         active: true,
+        restaurantId: true,
         createdAt: true,
         updatedAt: true,
       },
@@ -46,11 +74,7 @@ export async function GET(request: Request) {
 
     return NextResponse.json({ users })
   } catch (error) {
-    console.error('Users GET error:', error)
-    return NextResponse.json(
-      { error: 'Error al obtener usuarios' },
-      { status: 500 }
-    )
+    return handleApiError('Users GET', error)
   }
 }
 
@@ -63,40 +87,14 @@ export async function POST(request: Request) {
 
   try {
     const body = await request.json()
-    const { username, password, name, role, active } = body as {
-      username: string
-      password: string
-      name?: string
-      role?: string
-      active?: boolean
-    }
 
-    if (!username || !password) {
-      return NextResponse.json(
-        { error: 'Username y password son obligatorios' },
-        { status: 400 }
-      )
-    }
+    // ─── Zod validation ──────────────────────────────────
+    const validation = validateInput(createUserSchema, body)
+    if (!validation.success) return validation.error
 
-    if (password.length < 6) {
-      return NextResponse.json(
-        { error: 'El password debe tener al menos 6 caracteres' },
-        { status: 400 }
-      )
-    }
+    const { username, password, name, role: userRole, active, restaurantId: bodyRestaurantId } = validation.data
 
-    // Validate role
-    const validRoles: JwtPayload['role'][] = [
-      'super_admin', 'admin', 'encargado', 'camarero', 'cocina', 'caja',
-    ]
-    const userRole = role ?? 'camarero'
-    if (!validRoles.includes(userRole as JwtPayload['role'])) {
-      return NextResponse.json(
-        { error: `Rol inválido. Válidos: ${validRoles.join(', ')}` },
-        { status: 400 }
-      )
-    }
-
+    // ─── Role elevation check ────────────────────────────
     // Only super_admin can create super_admin or admin users
     if (
       (userRole === 'super_admin' || userRole === 'admin') &&
@@ -108,7 +106,7 @@ export async function POST(request: Request) {
       )
     }
 
-    // Check if username already exists
+    // ─── Check username uniqueness ───────────────────────
     const existing = await db.user.findUnique({ where: { username } })
     if (existing) {
       return NextResponse.json(
@@ -117,15 +115,28 @@ export async function POST(request: Request) {
       )
     }
 
+    // ─── Determine restaurantId for new user ─────────────
+    // super_admin can specify restaurantId explicitly
+    // Non-super_admin users inherit the creator's restaurantId
+    let targetRestaurantId: string | null
+    if (user.role === 'super_admin') {
+      // super_admin must specify restaurantId (required for audit scoping)
+      targetRestaurantId = bodyRestaurantId ?? null
+    } else {
+      // Non-super_admin: user is assigned to their restaurant
+      targetRestaurantId = user.restaurantId ?? null
+    }
+
     const passwordHash = await hashPassword(password)
 
     const newUser = await db.user.create({
       data: {
         username,
         passwordHash,
-        name: name ?? '',
+        name,
         role: userRole,
-        active: active ?? true,
+        active,
+        restaurantId: targetRestaurantId,
       },
       select: {
         id: true,
@@ -133,16 +144,24 @@ export async function POST(request: Request) {
         name: true,
         role: true,
         active: true,
+        restaurantId: true,
         createdAt: true,
       },
     })
 
+    // ─── Audit logging ──────────────────────────────────
+    await createAuditLog({
+      restaurantId: targetRestaurantId ?? 'unknown',
+      userId: user.userId,
+      action: 'user_created',
+      entityType: 'user',
+      entityId: newUser.id,
+      details: { username, role: userRole, active, restaurantId: targetRestaurantId },
+      ipAddress: request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || undefined,
+    })
+
     return NextResponse.json({ user: newUser }, { status: 201 })
   } catch (error) {
-    console.error('Users POST error:', error)
-    return NextResponse.json(
-      { error: 'Error al crear usuario' },
-      { status: 500 }
-    )
+    return handleApiError('Users POST', error)
   }
 }

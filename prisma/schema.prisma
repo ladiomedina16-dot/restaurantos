@@ -1,6 +1,6 @@
 // ============================================================
-// RESTAURANT APP - Production Schema v3
-// PostgreSQL (Supabase) - Secure, role-based, with audit trail
+// RESTAURANT APP - Production Schema v4
+// PostgreSQL (Supabase) - Multi-restaurant, audit, cash sessions
 // ============================================================
 
 generator client {
@@ -13,66 +13,113 @@ datasource db {
   directUrl = env("DIRECT_URL")
 }
 
+// ─── RESTAURANT (Multi-tenant root) ────────────────────────
+model Restaurant {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique   // URL-friendly identifier
+  address   String   @default("")
+  phone     String   @default("")
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users     User[]
+  products  Product[]
+  tables    Table[]
+  clients   Client[]
+  orders    Order[]
+  cashSessions CashSession[]
+}
+
 // ─── USUARIOS ──────────────────────────────────────────────
 // Roles: super_admin, admin, encargado, camarero, cocina, caja
 model User {
-  id           String   @id @default(cuid())
-  username     String   @unique
-  passwordHash String   // bcrypt hashed
-  name         String   @default("")   // display name
-  role         String   @default("camarero") // super_admin, admin, encargado, camarero, cocina, caja
-  active       Boolean  @default(true)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id           String    @id @default(cuid())
+  username     String    @unique
+  passwordHash String    // bcrypt hashed
+  name         String    @default("")   // display name
+  role         String    @default("camarero") // super_admin, admin, encargado, camarero, cocina, caja
+  active       Boolean   @default(true)
+  restaurantId String?   // null for super_admin (access to all)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  restaurant Restaurant? @relation(fields: [restaurantId], references: [id])
 
   // Relations - who created/processed things
-  ordersCreated Order[]  @relation("OrderCreator")
-  ordersReady   Order[]  @relation("OrderFinisher")
-  payments      Payment[]
+  ordersCreated        Order[]       @relation("OrderCreator")
+  ordersReady          Order[]       @relation("OrderFinisher")
+  payments             Payment[]
+  auditLogs            AuditLog[]
+  openedCashSessions   CashSession[] @relation("CashSessionOpener")
+  closedCashSessions   CashSession[] @relation("CashSessionCloser")
+
+  @@index([restaurantId])
+  @@index([role])
+  @@index([active])
 }
 
 // ─── PRODUCTOS ──────────────────────────────────────────────
 model Product {
-  id          String   @id @default(cuid())
-  name        String
-  description String   @default("")
-  price       Float   // precio en euros (source of truth, backend-only calculation)
-  category    String   @default("general") // bebida, tapa_fria, tapa_caliente, montadito, racion, postre, comida, general
-  stock       Int      @default(0)
-  imageUrl    String   @default("")
-  active      Boolean  @default(true)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id           String   @id @default(cuid())
+  name         String
+  description  String   @default("")
+  price        Float    // precio en euros (source of truth, backend-only calculation)
+  category     String   @default("general") // bebida, tapa_fria, tapa_caliente, montadito, racion, postre, comida, general
+  stock        Int      @default(0)
+  imageUrl     String   @default("")
+  active       Boolean  @default(true)
+  restaurantId String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
-  orderItems  OrderItem[]
+  restaurant Restaurant  @relation(fields: [restaurantId], references: [id])
+  orderItems OrderItem[]
+
+  @@index([restaurantId])
+  @@index([category])
+  @@index([active])
+  @@unique([name, restaurantId])  // product names unique per restaurant
 }
 
 // ─── MESAS ──────────────────────────────────────────────────
 model Table {
-  id       String @id @default(cuid())
-  number   Int    @unique
-  capacity Int    @default(4)
-  status   String @default("available") // available, occupied, reserved
-  zone     String @default("main")      // main, terrace, private, bar
-  notes    String @default("")
-  active   Boolean @default(true)
+  id           String  @id @default(cuid())
+  number       Int
+  capacity     Int     @default(4)
+  status       String  @default("available") // available, occupied, reserved
+  zone         String  @default("main")      // main, terrace, private, bar
+  notes        String  @default("")
+  active       Boolean @default(true)
+  restaurantId String
 
-  orders   Order[]
+  restaurant Restaurant @relation(fields: [restaurantId], references: [id])
+  orders     Order[]
+
+  @@index([restaurantId])
+  @@index([status])
+  @@unique([number, restaurantId])  // table numbers unique per restaurant
 }
 
 // ─── CLIENTES (CRM) ────────────────────────────────────────
 model Client {
-  id        String   @id @default(cuid())
-  name      String
-  phone     String   @unique
-  email     String   @default("")
-  points    Int      @default(0)      // puntos de fidelidad (1€ = 1 punto)
-  visits    Int      @default(0)
-  notes     String   @default("")
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id           String   @id @default(cuid())
+  name         String
+  phone        String
+  email        String   @default("")
+  points       Int      @default(0)      // puntos de fidelidad (1€ = 1 punto)
+  visits       Int      @default(0)
+  notes        String   @default("")
+  restaurantId String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
-  orders    Order[]
+  restaurant Restaurant @relation(fields: [restaurantId], references: [id])
+  orders     Order[]
+
+  @@index([restaurantId])
+  @@unique([phone, restaurantId])  // phone unique per restaurant
 }
 
 // ─── PEDIDOS ────────────────────────────────────────────────
@@ -81,21 +128,29 @@ model Order {
   tableId      String
   clientId     String?  // puede ser invitado sin registro
   status       String   @default("pending") // pending, in_progress, ready, served, paid, cancelled
-  subtotal     Float   @default(0)  // total antes de descuento (calculated backend-only)
-  discount     Float   @default(0)  // descuento aplicado (5ª gratis, etc.)
-  total        Float   @default(0)  // subtotal - discount
+  subtotal     Float    @default(0)  // total antes de descuento (calculated backend-only)
+  discount     Float    @default(0)  // descuento aplicado (5ª gratis, etc.)
+  total        Float    @default(0)  // subtotal - discount
   notes        String   @default("")
   createdById  String?  // who created the order
   finishedById String?  // who marked it ready
+  restaurantId String
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
+  restaurant Restaurant  @relation(fields: [restaurantId], references: [id])
   table       Table      @relation(fields: [tableId], references: [id])
   client      Client?    @relation(fields: [clientId], references: [id])
   createdBy   User?      @relation("OrderCreator", fields: [createdById], references: [id])
   finishedBy  User?      @relation("OrderFinisher", fields: [finishedById], references: [id])
   items       OrderItem[]
   payments    Payment[]
+
+  @@index([restaurantId])
+  @@index([status])
+  @@index([tableId])
+  @@index([clientId])
+  @@index([createdAt])
 }
 
 // ─── ITEMS DE PEDIDO ────────────────────────────────────────
@@ -104,29 +159,87 @@ model OrderItem {
   orderId    String
   productId  String
   quantity   Int      @default(1)
-  unitPrice  Float   // precio al momento del pedido (snapshot, backend-only)
-  subtotal   Float   // quantity * unitPrice (backend-only calculation)
+  unitPrice  Float    // precio al momento del pedido (snapshot, backend-only)
+  subtotal   Float    // quantity * unitPrice (backend-only calculation)
   notes      String   @default("")       // existing field for general notes
   modifiers  String   @default("")       // JSON: ["sin hielo", "poco hecho", "extra picante"]
   createdAt  DateTime @default(now())
 
   order     Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
   product   Product @relation(fields: [productId], references: [id])
+
+  @@index([orderId])
+  @@index([productId])
 }
 
 // ─── PAGOS (audit trail) ───────────────────────────────────
 model Payment {
-  id         String   @id @default(cuid())
-  orderId    String
-  userId     String   // who processed the payment
-  amount     Float   // amount paid
-  method     String   // efectivo, tarjeta
-  discount   Float   @default(0)  // discount applied
-  freeDrinks Int      @default(0)  // number of free drinks (5ª gratis)
-  pointsUsed Int      @default(0)  // points redeemed (future)
-  pointsEarned Int    @default(0)  // loyalty points earned
-  createdAt  DateTime @default(now())
+  id           String   @id @default(cuid())
+  orderId      String
+  userId       String   // who processed the payment
+  amount       Float    // amount paid
+  method       String   // efectivo, tarjeta
+  discount     Float    @default(0)  // discount applied
+  freeDrinks   Int      @default(0)  // number of free drinks (5ª gratis)
+  pointsUsed   Int      @default(0)  // points redeemed (future)
+  pointsEarned Int      @default(0)  // loyalty points earned
+  cashSessionId String? // linked to cash session
+  createdAt    DateTime @default(now())
 
-  order      Order    @relation(fields: [orderId], references: [id])
-  user       User     @relation(fields: [userId], references: [id])
+  order       Order       @relation(fields: [orderId], references: [id])
+  user        User        @relation(fields: [userId], references: [id])
+  cashSession CashSession? @relation(fields: [cashSessionId], references: [id])
+
+  @@index([orderId])
+  @@index([userId])
+  @@index([cashSessionId])
+  @@index([createdAt])
+}
+
+// ─── SESIÓN DE CAJA ────────────────────────────────────────
+model CashSession {
+  id             String    @id @default(cuid())
+  restaurantId   String
+  openedById     String    // who opened
+  closedById     String?   // who closed
+  openingCash    Float     @default(0)  // dinero inicial
+  closingCash    Float?     // dinero contado al cierre
+  expectedCash   Float?     // lo que debería haber según el sistema
+  totalSales     Float     @default(0)  // total de ventas
+  totalCard      Float     @default(0)  // total pagos tarjeta
+  totalCash      Float     @default(0)  // total pagos efectivo
+  difference     Float?     // diferencia entre cierre y esperado
+  status         String    @default("open")  // open, closed
+  openedAt       DateTime  @default(now())
+  closedAt       DateTime?
+
+  restaurant Restaurant @relation(fields: [restaurantId], references: [id])
+  openedBy   User       @relation("CashSessionOpener", fields: [openedById], references: [id])
+  closedBy   User?      @relation("CashSessionCloser", fields: [closedById], references: [id])
+  payments   Payment[]
+
+  @@index([restaurantId])
+  @@index([status])
+  @@index([openedAt])
+}
+
+// ─── LOG DE AUDITORÍA ──────────────────────────────────────
+model AuditLog {
+  id           String   @id @default(cuid())
+  restaurantId String
+  userId       String?  // who performed the action
+  action       String   // order_created, order_status_changed, payment_processed, order_cancelled, cash_opened, cash_closed
+  entityType   String   // order, payment, cash_session, table, product, client
+  entityId     String?  // ID of the affected entity
+  details      String   @default("")  // JSON with additional context
+  ipAddress    String   @default("")
+  createdAt    DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id])
+
+  @@index([restaurantId])
+  @@index([userId])
+  @@index([action])
+  @@index([entityType])
+  @@index([createdAt])
 }

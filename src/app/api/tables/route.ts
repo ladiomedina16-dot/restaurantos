@@ -1,26 +1,32 @@
 // ============================================================
-// /api/tables — Table management
-// GET  /api/tables   → List tables (any authenticated user)
-// POST /api/tables   → Create table (requires tables:create)
+// /api/tables — Table management (multi-restaurant)
+// GET  /api/tables   → List tables (any authenticated user, scoped to restaurant)
+// POST /api/tables   → Create table (requires tables:create, scoped to restaurant)
 // ============================================================
 
 import { db } from '@/lib/db'
 import { NextResponse } from 'next/server'
-import { authenticateAndAuthorize, authenticateRequest } from '@/lib/auth'
+import { authenticateAndAuthorize, requireRestaurantScope } from '@/lib/auth'
+import { createTableSchema, validateInput } from '@/lib/validations'
+import { createAuditLog } from '@/lib/audit'
+import { handleApiError } from '@/lib/errors'
 
 // ─── GET /api/tables ────────────────────────────────────────
 
 export async function GET(request: Request) {
-  // Any authenticated user can read tables
-  const auth = authenticateRequest(request)
-  if (!auth.success) return auth.response
+  const auth = authenticateAndAuthorize(request, 'tables:read')
+  if ('error' in auth) return auth.error
+
+  const scope = requireRestaurantScope(auth.user, request)
+  if ('error' in scope) return scope.error
+  const { restaurantId } = scope
 
   try {
     const { searchParams } = new URL(request.url)
     const status = searchParams.get('status')
     const zone = searchParams.get('zone')
 
-    const where: Record<string, unknown> = { active: true }
+    const where: Record<string, unknown> = { active: true, restaurantId }
 
     if (status) {
       where.status = status
@@ -37,11 +43,7 @@ export async function GET(request: Request) {
 
     return NextResponse.json({ tables })
   } catch (error) {
-    console.error('Tables GET error:', error)
-    return NextResponse.json(
-      { error: 'Failed to fetch tables' },
-      { status: 500 }
-    )
+    return handleApiError('Tables GET', error)
   }
 }
 
@@ -51,30 +53,26 @@ export async function POST(request: Request) {
   const auth = authenticateAndAuthorize(request, 'tables:create')
   if ('error' in auth) return auth.error
 
+  const scope = requireRestaurantScope(auth.user, request)
+  if ('error' in scope) return scope.error
+  const { restaurantId } = scope
+
   try {
     const body = await request.json()
-    const { number, capacity, zone, notes } = body as {
-      number: number
-      capacity?: number
-      zone?: string
-      notes?: string
-    }
 
-    if (number === undefined || number === null) {
-      return NextResponse.json(
-        { error: 'Table number is required' },
-        { status: 400 }
-      )
-    }
+    const validation = validateInput(createTableSchema, body)
+    if (!validation.success) return validation.error
 
-    // Check if table number already exists
+    const { number, capacity, zone, notes } = validation.data
+
+    // Check table number uniqueness per restaurant
     const existing = await db.table.findUnique({
-      where: { number },
+      where: { number_restaurantId: { number, restaurantId } },
     })
 
     if (existing) {
       return NextResponse.json(
-        { error: 'Table number already exists' },
+        { error: 'Ya existe una mesa con este número en este restaurante' },
         { status: 409 }
       )
     }
@@ -82,18 +80,24 @@ export async function POST(request: Request) {
     const table = await db.table.create({
       data: {
         number,
-        capacity: capacity ?? 4,
-        zone: zone ?? 'main',
-        notes: notes ?? '',
+        capacity,
+        zone,
+        notes,
+        restaurantId,
       },
+    })
+
+    await createAuditLog({
+      restaurantId,
+      userId: auth.user.userId,
+      action: 'table_created',
+      entityType: 'table',
+      entityId: table.id,
+      details: { number: table.number, capacity: table.capacity, zone: table.zone },
     })
 
     return NextResponse.json({ table }, { status: 201 })
   } catch (error) {
-    console.error('Tables POST error:', error)
-    return NextResponse.json(
-      { error: 'Failed to create table' },
-      { status: 500 }
-    )
+    return handleApiError('Tables POST', error)
   }
 }

@@ -1,13 +1,16 @@
 // ============================================================
-// /api/clients/[id] — Single client operations
-// GET    /api/clients/[id]  → Get client (any authenticated user)
-// PUT    /api/clients/[id]  → Update client (requires clients:update)
-// DELETE /api/clients/[id]  → Delete client (requires clients:delete)
+// /api/clients/[id] — Single client operations (multi-restaurant)
+// GET    /api/clients/[id]  → Get client (any authenticated user, scoped to restaurant)
+// PUT    /api/clients/[id]  → Update client (requires clients:update, scoped to restaurant)
+// DELETE /api/clients/[id]  → Delete client (requires clients:delete, scoped to restaurant)
 // ============================================================
 
 import { db } from '@/lib/db'
 import { NextResponse } from 'next/server'
-import { authenticateAndAuthorize, authenticateRequest } from '@/lib/auth'
+import { authenticateAndAuthorize, requireRestaurantScope } from '@/lib/auth'
+import { updateClientSchema, validateInput } from '@/lib/validations'
+import { createAuditLog } from '@/lib/audit'
+import { handleApiError } from '@/lib/errors'
 
 // ─── GET /api/clients/[id] ──────────────────────────────────
 
@@ -15,9 +18,12 @@ export async function GET(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  // Any authenticated user can read a client
-  const auth = authenticateRequest(request)
-  if (!auth.success) return auth.response
+  const auth = authenticateAndAuthorize(request, 'clients:read')
+  if ('error' in auth) return auth.error
+
+  const scope = requireRestaurantScope(auth.user, request)
+  if ('error' in scope) return scope.error
+  const { restaurantId } = scope
 
   try {
     const { id } = await params
@@ -39,7 +45,7 @@ export async function GET(
       },
     })
 
-    if (!client) {
+    if (!client || client.restaurantId !== restaurantId) {
       return NextResponse.json(
         { error: 'Client not found' },
         { status: 404 }
@@ -48,11 +54,7 @@ export async function GET(
 
     return NextResponse.json({ client })
   } catch (error) {
-    console.error('Client GET error:', error)
-    return NextResponse.json(
-      { error: 'Failed to fetch client' },
-      { status: 500 }
-    )
+    return handleApiError('Client GET', error)
   }
 }
 
@@ -65,57 +67,63 @@ export async function PUT(
   const auth = authenticateAndAuthorize(request, 'clients:update')
   if ('error' in auth) return auth.error
 
+  const scope = requireRestaurantScope(auth.user, request)
+  if ('error' in scope) return scope.error
+  const { restaurantId } = scope
+
   try {
     const { id } = await params
     const body = await request.json()
-    const { name, phone, email, notes, points, visits } = body as {
-      name?: string
-      phone?: string
-      email?: string
-      notes?: string
-      points?: number
-      visits?: number
-    }
+
+    const validation = validateInput(updateClientSchema, body)
+    if (!validation.success) return validation.error
 
     const existing = await db.client.findUnique({ where: { id } })
-    if (!existing) {
+    if (!existing || existing.restaurantId !== restaurantId) {
       return NextResponse.json(
         { error: 'Client not found' },
         { status: 404 }
       )
     }
 
-    // If changing phone, check uniqueness
-    if (phone !== undefined && phone !== existing.phone) {
-      const duplicate = await db.client.findUnique({ where: { phone } })
+    // If changing phone, check uniqueness per restaurant
+    if (validation.data.phone !== undefined && validation.data.phone !== existing.phone) {
+      const duplicate = await db.client.findUnique({
+        where: { phone_restaurantId: { phone: validation.data.phone, restaurantId } },
+      })
       if (duplicate) {
         return NextResponse.json(
-          { error: 'A client with this phone number already exists' },
+          { error: 'Ya existe un cliente con este teléfono en este restaurante' },
           { status: 409 }
         )
       }
     }
 
     const updateData: Record<string, unknown> = {}
-    if (name !== undefined) updateData.name = name
-    if (phone !== undefined) updateData.phone = phone
-    if (email !== undefined) updateData.email = email
-    if (notes !== undefined) updateData.notes = notes
-    if (points !== undefined) updateData.points = points
-    if (visits !== undefined) updateData.visits = visits
+    if (validation.data.name !== undefined) updateData.name = validation.data.name
+    if (validation.data.phone !== undefined) updateData.phone = validation.data.phone
+    if (validation.data.email !== undefined) updateData.email = validation.data.email
+    if (validation.data.notes !== undefined) updateData.notes = validation.data.notes
+    if (validation.data.points !== undefined) updateData.points = validation.data.points
+    if (validation.data.visits !== undefined) updateData.visits = validation.data.visits
 
     const client = await db.client.update({
       where: { id },
       data: updateData,
     })
 
+    await createAuditLog({
+      restaurantId,
+      userId: auth.user.userId,
+      action: 'client_updated',
+      entityType: 'client',
+      entityId: client.id,
+      details: { updatedFields: Object.keys(updateData) },
+    })
+
     return NextResponse.json({ client })
   } catch (error) {
-    console.error('Client PUT error:', error)
-    return NextResponse.json(
-      { error: 'Failed to update client' },
-      { status: 500 }
-    )
+    return handleApiError('Client PUT', error)
   }
 }
 
@@ -128,6 +136,10 @@ export async function DELETE(
   const auth = authenticateAndAuthorize(request, 'clients:delete')
   if ('error' in auth) return auth.error
 
+  const scope = requireRestaurantScope(auth.user, request)
+  if ('error' in scope) return scope.error
+  const { restaurantId } = scope
+
   try {
     const { id } = await params
 
@@ -136,7 +148,7 @@ export async function DELETE(
       include: { _count: { select: { orders: true } } },
     })
 
-    if (!existing) {
+    if (!existing || existing.restaurantId !== restaurantId) {
       return NextResponse.json(
         { error: 'Client not found' },
         { status: 404 }
@@ -161,12 +173,17 @@ export async function DELETE(
     // Delete the client (their completed orders will have clientId set to null)
     await db.client.delete({ where: { id } })
 
+    await createAuditLog({
+      restaurantId,
+      userId: auth.user.userId,
+      action: 'client_deleted',
+      entityType: 'client',
+      entityId: id,
+      details: { name: existing.name, phone: existing.phone },
+    })
+
     return NextResponse.json({ message: 'Client deleted successfully' })
   } catch (error) {
-    console.error('Client DELETE error:', error)
-    return NextResponse.json(
-      { error: 'Failed to delete client' },
-      { status: 500 }
-    )
+    return handleApiError('Client DELETE', error)
   }
 }

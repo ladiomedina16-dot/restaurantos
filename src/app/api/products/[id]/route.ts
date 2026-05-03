@@ -1,13 +1,16 @@
 // ============================================================
-// /api/products/[id] — Single product operations
-// GET    /api/products/[id]  → Get product (any authenticated user)
-// PUT    /api/products/[id]  → Update product (requires products:update)
-// DELETE /api/products/[id]  → Delete product (requires products:delete)
+// /api/products/[id] — Single product operations (multi-restaurant)
+// GET    /api/products/[id]  → Get product (any authenticated user, scoped to restaurant)
+// PUT    /api/products/[id]  → Update product (requires products:update, scoped to restaurant)
+// DELETE /api/products/[id]  → Delete product (requires products:delete, scoped to restaurant)
 // ============================================================
 
 import { db } from '@/lib/db'
 import { NextResponse } from 'next/server'
-import { authenticateAndAuthorize, authenticateRequest } from '@/lib/auth'
+import { authenticateAndAuthorize, requireRestaurantScope } from '@/lib/auth'
+import { updateProductSchema, validateInput } from '@/lib/validations'
+import { createAuditLog } from '@/lib/audit'
+import { handleApiError } from '@/lib/errors'
 
 // ─── GET /api/products/[id] ─────────────────────────────────
 
@@ -15,9 +18,12 @@ export async function GET(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  // Any authenticated user can read a product
-  const auth = authenticateRequest(request)
-  if (!auth.success) return auth.response
+  const auth = authenticateAndAuthorize(request, 'products:read')
+  if ('error' in auth) return auth.error
+
+  const scope = requireRestaurantScope(auth.user, request)
+  if ('error' in scope) return scope.error
+  const { restaurantId } = scope
 
   try {
     const { id } = await params
@@ -26,7 +32,7 @@ export async function GET(
       where: { id },
     })
 
-    if (!product) {
+    if (!product || product.restaurantId !== restaurantId) {
       return NextResponse.json(
         { error: 'Product not found' },
         { status: 404 }
@@ -35,11 +41,7 @@ export async function GET(
 
     return NextResponse.json({ product })
   } catch (error) {
-    console.error('Product GET error:', error)
-    return NextResponse.json(
-      { error: 'Failed to fetch product' },
-      { status: 500 }
-    )
+    return handleApiError('Product GET', error)
   }
 }
 
@@ -52,48 +54,64 @@ export async function PUT(
   const auth = authenticateAndAuthorize(request, 'products:update')
   if ('error' in auth) return auth.error
 
+  const scope = requireRestaurantScope(auth.user, request)
+  if ('error' in scope) return scope.error
+  const { restaurantId } = scope
+
   try {
     const { id } = await params
     const body = await request.json()
-    const { name, description, price, category, stock, imageUrl, active } = body as {
-      name?: string
-      description?: string
-      price?: number
-      category?: string
-      stock?: number
-      imageUrl?: string
-      active?: boolean
-    }
+
+    const validation = validateInput(updateProductSchema, body)
+    if (!validation.success) return validation.error
 
     const existing = await db.product.findUnique({ where: { id } })
-    if (!existing) {
+    if (!existing || existing.restaurantId !== restaurantId) {
       return NextResponse.json(
         { error: 'Product not found' },
         { status: 404 }
       )
     }
 
+    // If changing name, check uniqueness per restaurant
+    if (validation.data.name !== undefined && validation.data.name !== existing.name) {
+      const duplicate = await db.product.findUnique({
+        where: { name_restaurantId: { name: validation.data.name, restaurantId } },
+      })
+      if (duplicate) {
+        return NextResponse.json(
+          { error: 'Ya existe un producto con este nombre en este restaurante' },
+          { status: 409 }
+        )
+      }
+    }
+
     const updateData: Record<string, unknown> = {}
-    if (name !== undefined) updateData.name = name
-    if (description !== undefined) updateData.description = description
-    if (price !== undefined) updateData.price = parseFloat(String(price))
-    if (category !== undefined) updateData.category = category
-    if (stock !== undefined) updateData.stock = stock
-    if (imageUrl !== undefined) updateData.imageUrl = imageUrl
-    if (active !== undefined) updateData.active = active
+    if (validation.data.name !== undefined) updateData.name = validation.data.name
+    if (validation.data.description !== undefined) updateData.description = validation.data.description
+    if (validation.data.price !== undefined) updateData.price = validation.data.price
+    if (validation.data.category !== undefined) updateData.category = validation.data.category
+    if (validation.data.stock !== undefined) updateData.stock = validation.data.stock
+    if (validation.data.imageUrl !== undefined) updateData.imageUrl = validation.data.imageUrl
+    if (validation.data.active !== undefined) updateData.active = validation.data.active
 
     const product = await db.product.update({
       where: { id },
       data: updateData,
     })
 
+    await createAuditLog({
+      restaurantId,
+      userId: auth.user.userId,
+      action: 'product_updated',
+      entityType: 'product',
+      entityId: product.id,
+      details: { updatedFields: Object.keys(updateData) },
+    })
+
     return NextResponse.json({ product })
   } catch (error) {
-    console.error('Product PUT error:', error)
-    return NextResponse.json(
-      { error: 'Failed to update product' },
-      { status: 500 }
-    )
+    return handleApiError('Product PUT', error)
   }
 }
 
@@ -106,11 +124,15 @@ export async function DELETE(
   const auth = authenticateAndAuthorize(request, 'products:delete')
   if ('error' in auth) return auth.error
 
+  const scope = requireRestaurantScope(auth.user, request)
+  if ('error' in scope) return scope.error
+  const { restaurantId } = scope
+
   try {
     const { id } = await params
 
     const existing = await db.product.findUnique({ where: { id } })
-    if (!existing) {
+    if (!existing || existing.restaurantId !== restaurantId) {
       return NextResponse.json(
         { error: 'Product not found' },
         { status: 404 }
@@ -123,12 +145,17 @@ export async function DELETE(
       data: { active: false },
     })
 
+    await createAuditLog({
+      restaurantId,
+      userId: auth.user.userId,
+      action: 'product_deleted',
+      entityType: 'product',
+      entityId: product.id,
+      details: { name: product.name, softDelete: true },
+    })
+
     return NextResponse.json({ product })
   } catch (error) {
-    console.error('Product DELETE error:', error)
-    return NextResponse.json(
-      { error: 'Failed to delete product' },
-      { status: 500 }
-    )
+    return handleApiError('Product DELETE', error)
   }
 }

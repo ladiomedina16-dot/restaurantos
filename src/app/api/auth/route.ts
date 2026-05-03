@@ -3,6 +3,7 @@
 // POST /api/auth          → { username, password } → JWT token + refresh + user info
 // POST /api/auth/refresh  → { refreshToken } → new JWT token
 // GET  /api/auth/me       → Authorization: Bearer xxx → current user
+// v4: Rate limiting, Zod validation, audit logging, multi-restaurant
 // ============================================================
 
 import { db } from '@/lib/db'
@@ -14,23 +15,33 @@ import {
   signRefreshToken,
   verifyToken,
   verifyRefreshToken,
+  checkRateLimit,
+  clearRateLimit,
   type JwtPayload,
 } from '@/lib/auth'
+import { validateInput, loginSchema, refreshTokenSchema } from '@/lib/validations'
+import { handleApiError } from '@/lib/errors'
+import { createAuditLog } from '@/lib/audit'
 
-// ─── POST /api/auth (login) ────────────────────────────────
+// ─── Helper: get client IP ──────────────────────────────────
+
+function getClientIp(request: Request): string {
+  return request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || 'unknown'
+}
+
+// ─── POST /api/auth (login / refresh) ──────────────────────
 
 export async function POST(request: Request) {
   try {
     const body = await request.json()
-    const { username, password, refreshToken: refreshRequestToken } = body as {
-      username?: string
-      password?: string
-      refreshToken?: string
-    }
+    const clientIp = getClientIp(request)
 
     // ─── Refresh token flow ──────────────────────────────────
-    if (refreshRequestToken) {
-      const payload = verifyRefreshToken(refreshRequestToken)
+    if (body.refreshToken) {
+      const validation = validateInput(refreshTokenSchema, { refreshToken: body.refreshToken })
+      if (!validation.success) return validation.error
+
+      const payload = verifyRefreshToken(validation.data.refreshToken)
       if (!payload) {
         return NextResponse.json(
           { error: 'Refresh token inválido o expirado.' },
@@ -41,7 +52,7 @@ export async function POST(request: Request) {
       // Verify user still exists and is active
       const user = await db.user.findUnique({
         where: { id: payload.userId },
-        select: { id: true, username: true, name: true, role: true, active: true },
+        select: { id: true, username: true, name: true, role: true, active: true, restaurantId: true },
       })
 
       if (!user || !user.active) {
@@ -55,6 +66,7 @@ export async function POST(request: Request) {
         userId: user.id,
         username: user.username,
         role: user.role as JwtPayload['role'],
+        restaurantId: user.restaurantId ?? undefined,
       }
 
       const token = signToken(newPayload)
@@ -68,17 +80,31 @@ export async function POST(request: Request) {
           username: user.username,
           name: user.name,
           role: user.role,
+          restaurantId: user.restaurantId,
         },
       })
     }
 
     // ─── Login flow ──────────────────────────────────────────
-    if (!username || !password) {
+
+    // Rate limiting check
+    const rateLimitResult = checkRateLimit(clientIp)
+    if (!rateLimitResult.allowed) {
+      const retryAfterSeconds = Math.ceil((rateLimitResult.retryAfterMs ?? 60000) / 1000)
       return NextResponse.json(
-        { error: 'Username and password are required' },
-        { status: 400 }
+        {
+          error: 'Demasiados intentos de login. Inténtalo más tarde.',
+          retryAfterSeconds,
+        },
+        { status: 429, headers: { 'Retry-After': String(retryAfterSeconds) } }
       )
     }
+
+    // Validate input with Zod
+    const validation = validateInput(loginSchema, { username: body.username, password: body.password })
+    if (!validation.success) return validation.error
+
+    const { username, password } = validation.data
 
     const user = await db.user.findUnique({ where: { username } })
 
@@ -104,14 +130,29 @@ export async function POST(request: Request) {
       )
     }
 
+    // Clear rate limit on successful login
+    clearRateLimit(clientIp)
+
     const payload: JwtPayload = {
       userId: user.id,
       username: user.username,
       role: user.role as JwtPayload['role'],
+      restaurantId: user.restaurantId ?? undefined,
     }
 
     const token = signToken(payload)
     const refreshToken = signRefreshToken(payload)
+
+    // Audit log for successful login (only if user has a restaurant)
+    if (user.restaurantId) {
+      await createAuditLog({
+        restaurantId: user.restaurantId,
+        userId: user.id,
+        action: 'login_success',
+        entityType: 'auth',
+        ipAddress: clientIp,
+      })
+    }
 
     return NextResponse.json({
       token,
@@ -121,14 +162,11 @@ export async function POST(request: Request) {
         username: user.username,
         name: user.name,
         role: user.role,
+        restaurantId: user.restaurantId,
       },
     })
   } catch (error) {
-    console.error('Auth login error:', error)
-    return NextResponse.json(
-      { error: 'Error al iniciar sesión' },
-      { status: 500 }
-    )
+    return handleApiError('Auth POST', error)
   }
 }
 
@@ -162,6 +200,7 @@ export async function GET(request: Request) {
         name: true,
         role: true,
         active: true,
+        restaurantId: true,
         createdAt: true,
       },
     })
@@ -175,10 +214,6 @@ export async function GET(request: Request) {
 
     return NextResponse.json({ user })
   } catch (error) {
-    console.error('Auth me error:', error)
-    return NextResponse.json(
-      { error: 'Error al obtener usuario' },
-      { status: 500 }
-    )
+    return handleApiError('Auth GET /me', error)
   }
 }

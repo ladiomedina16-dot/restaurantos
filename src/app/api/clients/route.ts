@@ -1,30 +1,36 @@
 // ============================================================
-// /api/clients — Client management
-// GET  /api/clients   → List clients (any authenticated user)
-// POST /api/clients   → Create client (requires clients:create)
+// /api/clients — Client management (multi-restaurant)
+// GET  /api/clients   → List clients (any authenticated user, scoped to restaurant)
+// POST /api/clients   → Create client (requires clients:create, scoped to restaurant)
 // ============================================================
 
 import { db } from '@/lib/db'
 import { NextResponse } from 'next/server'
-import { authenticateAndAuthorize, authenticateRequest } from '@/lib/auth'
+import { authenticateAndAuthorize, requireRestaurantScope } from '@/lib/auth'
+import { createClientSchema, validateInput } from '@/lib/validations'
+import { createAuditLog } from '@/lib/audit'
+import { handleApiError } from '@/lib/errors'
 
 // ─── GET /api/clients ───────────────────────────────────────
 
 export async function GET(request: Request) {
-  // Any authenticated user can read clients
-  const auth = authenticateRequest(request)
-  if (!auth.success) return auth.response
+  const auth = authenticateAndAuthorize(request, 'clients:read')
+  if ('error' in auth) return auth.error
+
+  const scope = requireRestaurantScope(auth.user, request)
+  if ('error' in scope) return scope.error
+  const { restaurantId } = scope
 
   try {
     const { searchParams } = new URL(request.url)
     const search = searchParams.get('search')
 
-    const where: Record<string, unknown> = {}
+    const where: Record<string, unknown> = { restaurantId }
 
     if (search) {
       where.OR = [
-        { name: { contains: search, mode: 'insensitive' } },
-        { phone: { contains: search, mode: 'insensitive' } },
+        { name: { contains: search, mode: 'insensitive' }, restaurantId },
+        { phone: { contains: search, mode: 'insensitive' }, restaurantId },
       ]
     }
 
@@ -40,11 +46,7 @@ export async function GET(request: Request) {
 
     return NextResponse.json({ clients })
   } catch (error) {
-    console.error('Clients GET error:', error)
-    return NextResponse.json(
-      { error: 'Failed to fetch clients' },
-      { status: 500 }
-    )
+    return handleApiError('Clients GET', error)
   }
 }
 
@@ -54,30 +56,26 @@ export async function POST(request: Request) {
   const auth = authenticateAndAuthorize(request, 'clients:create')
   if ('error' in auth) return auth.error
 
+  const scope = requireRestaurantScope(auth.user, request)
+  if ('error' in scope) return scope.error
+  const { restaurantId } = scope
+
   try {
     const body = await request.json()
-    const { name, phone, email, notes } = body as {
-      name: string
-      phone: string
-      email?: string
-      notes?: string
-    }
 
-    if (!name || !phone) {
-      return NextResponse.json(
-        { error: 'Name and phone are required' },
-        { status: 400 }
-      )
-    }
+    const validation = validateInput(createClientSchema, body)
+    if (!validation.success) return validation.error
 
-    // Check if phone already exists
+    const { name, phone, email, notes } = validation.data
+
+    // Check phone uniqueness per restaurant
     const existing = await db.client.findUnique({
-      where: { phone },
+      where: { phone_restaurantId: { phone, restaurantId } },
     })
 
     if (existing) {
       return NextResponse.json(
-        { error: 'A client with this phone number already exists' },
+        { error: 'Ya existe un cliente con este teléfono en este restaurante' },
         { status: 409 }
       )
     }
@@ -86,17 +84,23 @@ export async function POST(request: Request) {
       data: {
         name,
         phone,
-        email: email ?? '',
-        notes: notes ?? '',
+        email,
+        notes,
+        restaurantId,
       },
+    })
+
+    await createAuditLog({
+      restaurantId,
+      userId: auth.user.userId,
+      action: 'client_created',
+      entityType: 'client',
+      entityId: client.id,
+      details: { name: client.name, phone: client.phone },
     })
 
     return NextResponse.json({ client }, { status: 201 })
   } catch (error) {
-    console.error('Clients POST error:', error)
-    return NextResponse.json(
-      { error: 'Failed to create client' },
-      { status: 500 }
-    )
+    return handleApiError('Clients POST', error)
   }
 }

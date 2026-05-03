@@ -1,14 +1,64 @@
 // ============================================================
 // Auth utilities: JWT, bcrypt, role-based access
+// v4: Multi-restaurant support, rate limiting
 // ============================================================
 
 import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
+import { NextResponse } from 'next/server'
 
 const JWT_SECRET = process.env.JWT_SECRET || 'rst-os-dev-jwt-fallback'
 const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || 'rst-os-dev-refresh-fallback'
 const JWT_EXPIRES_IN = '8h'
 const JWT_REFRESH_EXPIRES_IN = '7d'
+
+// ─── Rate Limiting (in-memory) ─────────────────────────────
+
+const loginAttempts = new Map<string, { count: number; lastAttempt: number }>()
+const MAX_LOGIN_ATTEMPTS = 5
+const LOGIN_WINDOW_MS = 15 * 60 * 1000 // 15 minutes
+
+export function checkRateLimit(ip: string): { allowed: boolean; retryAfterMs?: number } {
+  const now = Date.now()
+  const record = loginAttempts.get(ip)
+
+  if (!record) {
+    loginAttempts.set(ip, { count: 1, lastAttempt: now })
+    return { allowed: true }
+  }
+
+  // Reset window if expired
+  if (now - record.lastAttempt > LOGIN_WINDOW_MS) {
+    loginAttempts.set(ip, { count: 1, lastAttempt: now })
+    return { allowed: true }
+  }
+
+  // Within window
+  if (record.count >= MAX_LOGIN_ATTEMPTS) {
+    const retryAfterMs = LOGIN_WINDOW_MS - (now - record.lastAttempt)
+    return { allowed: false, retryAfterMs }
+  }
+
+  record.count++
+  record.lastAttempt = now
+  return { allowed: true }
+}
+
+export function clearRateLimit(ip: string) {
+  loginAttempts.delete(ip)
+}
+
+// Clean up old entries every 5 minutes
+if (typeof setInterval !== 'undefined') {
+  setInterval(() => {
+    const now = Date.now()
+    for (const [ip, record] of loginAttempts.entries()) {
+      if (now - record.lastAttempt > LOGIN_WINDOW_MS) {
+        loginAttempts.delete(ip)
+      }
+    }
+  }, 5 * 60 * 1000)
+}
 
 // ─── Types ──────────────────────────────────────────────────
 
@@ -18,6 +68,7 @@ export interface JwtPayload {
   userId: string
   username: string
   role: UserRole
+  restaurantId?: string  // null for super_admin
 }
 
 // ─── Password utilities ─────────────────────────────────────
@@ -67,6 +118,9 @@ export const ROLE_PERMISSIONS: Record<UserRole, string[]> = {
     'clients:read', 'clients:create', 'clients:update', 'clients:delete',
     'users:read', 'users:create', 'users:update', 'users:delete',
     'payments:read', 'dashboard:read',
+    'cash:read', 'cash:open', 'cash:close',
+    'print:read',
+    'audit:read',
   ],
   encargado: [
     'orders:read', 'orders:create', 'orders:update', 'orders:pay',
@@ -75,6 +129,9 @@ export const ROLE_PERMISSIONS: Record<UserRole, string[]> = {
     'clients:read', 'clients:create', 'clients:update',
     'users:read',
     'payments:read', 'dashboard:read',
+    'cash:read', 'cash:open', 'cash:close',
+    'print:read',
+    'audit:read',
   ],
   camarero: [
     'orders:read', 'orders:create',
@@ -92,6 +149,8 @@ export const ROLE_PERMISSIONS: Record<UserRole, string[]> = {
     'tables:read',
     'clients:read',
     'payments:read',
+    'cash:read', 'cash:open', 'cash:close',
+    'print:read',
   ],
 }
 
@@ -124,8 +183,6 @@ export function canAccessTab(role: UserRole, tab: string): boolean {
 
 // ─── API Auth Helper ────────────────────────────────────────
 
-import { NextResponse } from 'next/server'
-
 export interface AuthResult {
   success: true
   user: JwtPayload
@@ -140,7 +197,7 @@ export type AuthCheck = AuthResult | AuthError
 
 /**
  * Extract and verify JWT from Authorization header.
- * Returns the user payload or an error response.
+ * Returns the user payload (now includes restaurantId) or an error response.
  */
 export function authenticateRequest(request: Request): AuthCheck {
   const authHeader = request.headers.get('Authorization')
@@ -172,7 +229,6 @@ export function authenticateRequest(request: Request): AuthCheck {
 
 /**
  * Check if the authenticated user has the required permission.
- * Call after authenticateRequest().
  */
 export function requirePermission(auth: AuthResult, permission: string): NextResponse | null {
   if (!hasPermission(auth.user.role as UserRole, permission)) {
@@ -202,4 +258,47 @@ export function authenticateAndAuthorize(
   }
 
   return { user: auth.user }
+}
+
+/**
+ * Get the restaurant scope for the authenticated user.
+ * - super_admin: must provide X-Restaurant-Id header, or returns all
+ * - Others: returns their assigned restaurantId
+ */
+export function getRestaurantScope(request: Request, user: JwtPayload): { restaurantId?: string; isSuperAdmin: boolean } {
+  if (user.role === 'super_admin') {
+    const headerRestaurantId = request.headers.get('X-Restaurant-Id')
+    return { restaurantId: headerRestaurantId || undefined, isSuperAdmin: true }
+  }
+  return { restaurantId: user.restaurantId, isSuperAdmin: false }
+}
+
+/**
+ * Ensure the user can only access data within their restaurant.
+ * Returns the restaurantId to filter by, or an error response.
+ */
+export function requireRestaurantScope(user: JwtPayload, request: Request): { restaurantId: string } | { error: NextResponse } {
+  if (user.role === 'super_admin') {
+    const headerRestaurantId = request.headers.get('X-Restaurant-Id')
+    if (!headerRestaurantId) {
+      return {
+        error: NextResponse.json(
+          { error: 'super_admin debe especificar X-Restaurant-Id header' },
+          { status: 400 }
+        ),
+      }
+    }
+    return { restaurantId: headerRestaurantId }
+  }
+
+  if (!user.restaurantId) {
+    return {
+      error: NextResponse.json(
+        { error: 'Usuario sin restaurante asignado' },
+        { status: 403 }
+      ),
+    }
+  }
+
+  return { restaurantId: user.restaurantId }
 }

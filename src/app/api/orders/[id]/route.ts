@@ -2,11 +2,15 @@
 // /api/orders/[id] — Single order operations
 // GET  /api/orders/[id]  → Get order (requires orders:read)
 // PUT  /api/orders/[id]  → Update order (requires orders:update)
+// Multi-restaurant scoped, Zod validated, audit logged
 // ============================================================
 
 import { db } from '@/lib/db'
 import { NextResponse } from 'next/server'
-import { authenticateAndAuthorize } from '@/lib/auth'
+import { authenticateAndAuthorize, requireRestaurantScope } from '@/lib/auth'
+import { validateInput, updateOrderSchema } from '@/lib/validations'
+import { createAuditLog } from '@/lib/audit'
+import { handleApiError } from '@/lib/errors'
 import { emitOrderStatusChanged, emitOrderReady } from '@/lib/realtime'
 
 // ─── GET /api/orders/[id] ───────────────────────────────────
@@ -17,6 +21,11 @@ export async function GET(
 ) {
   const auth = authenticateAndAuthorize(request, 'orders:read')
   if ('error' in auth) return auth.error
+  const { user } = auth
+
+  const scope = requireRestaurantScope(user, request)
+  if ('error' in scope) return scope.error
+  const { restaurantId } = scope
 
   try {
     const { id } = await params
@@ -40,7 +49,8 @@ export async function GET(
       },
     })
 
-    if (!order) {
+    // Data isolation: return 404 if order doesn't exist OR doesn't belong to restaurant
+    if (!order || order.restaurantId !== restaurantId) {
       return NextResponse.json(
         { error: 'Order not found' },
         { status: 404 }
@@ -49,11 +59,7 @@ export async function GET(
 
     return NextResponse.json({ order })
   } catch (error) {
-    console.error('Order GET error:', error)
-    return NextResponse.json(
-      { error: 'Failed to fetch order' },
-      { status: 500 }
-    )
+    return handleApiError('Order GET', error)
   }
 }
 
@@ -67,39 +73,29 @@ export async function PUT(
   if ('error' in auth) return auth.error
   const { user } = auth
 
+  const scope = requireRestaurantScope(user, request)
+  if ('error' in scope) return scope.error
+  const { restaurantId } = scope
+
   try {
     const { id } = await params
     const body = await request.json()
-    const { status, notes } = body as {
-      status?: string
-      notes?: string
-    }
+
+    // Zod validation
+    const validation = validateInput(updateOrderSchema, body)
+    if (!validation.success) return validation.error
+    const { status, notes } = validation.data
 
     const existing = await db.order.findUnique({
       where: { id },
       include: { items: true },
     })
 
-    if (!existing) {
+    // Data isolation: return 404 if not found or wrong restaurant
+    if (!existing || existing.restaurantId !== restaurantId) {
       return NextResponse.json(
         { error: 'Order not found' },
         { status: 404 }
-      )
-    }
-
-    const validStatuses = [
-      'pending',
-      'in_progress',
-      'ready',
-      'served',
-      'paid',
-      'cancelled',
-    ]
-
-    if (status !== undefined && !validStatuses.includes(status)) {
-      return NextResponse.json(
-        { error: `Invalid status. Must be one of: ${validStatuses.join(', ')}` },
-        { status: 400 }
       )
     }
 
@@ -135,10 +131,11 @@ export async function PUT(
           },
         })
 
-        // Check if table has other active orders
+        // Check if table has other active orders (scoped to restaurant)
         const activeOrdersCount = await tx.order.count({
           where: {
             tableId: existing.tableId,
+            restaurantId,
             status: { notIn: ['paid', 'cancelled'] },
             id: { not: id },
           },
@@ -157,6 +154,19 @@ export async function PUT(
 
       // Emit real-time status change
       await emitOrderStatusChanged(order)
+
+      // Audit log
+      await createAuditLog({
+        restaurantId,
+        userId: user.userId,
+        action: 'order_cancelled',
+        entityType: 'order',
+        entityId: id,
+        details: {
+          previousStatus: existing.status,
+          tableId: existing.tableId,
+        },
+      })
 
       return NextResponse.json({ order })
     }
@@ -197,6 +207,19 @@ export async function PUT(
       await emitOrderStatusChanged(order)
       await emitOrderReady(order)
 
+      // Audit log
+      await createAuditLog({
+        restaurantId,
+        userId: user.userId,
+        action: 'order_status_changed',
+        entityType: 'order',
+        entityId: id,
+        details: {
+          from: existing.status,
+          to: 'ready',
+        },
+      })
+
       return NextResponse.json({ order })
     }
 
@@ -227,10 +250,11 @@ export async function PUT(
           },
         })
 
-        // Check if table has other active (non-paid, non-cancelled) orders
+        // Check if table has other active (non-paid, non-cancelled) orders (scoped to restaurant)
         const activeOrdersCount = await tx.order.count({
           where: {
             tableId: existing.tableId,
+            restaurantId,
             status: { notIn: ['paid', 'cancelled'] },
             id: { not: id },
           },
@@ -248,6 +272,19 @@ export async function PUT(
 
       // Emit real-time status change
       await emitOrderStatusChanged(order)
+
+      // Audit log
+      await createAuditLog({
+        restaurantId,
+        userId: user.userId,
+        action: 'order_status_changed',
+        entityType: 'order',
+        entityId: id,
+        details: {
+          from: existing.status,
+          to: 'paid',
+        },
+      })
 
       return NextResponse.json({ order })
     }
@@ -280,14 +317,23 @@ export async function PUT(
     // Emit real-time status change for any status update
     if (status !== undefined && status !== existing.status) {
       await emitOrderStatusChanged(order)
+
+      // Audit log for any status change not caught above
+      await createAuditLog({
+        restaurantId,
+        userId: user.userId,
+        action: 'order_status_changed',
+        entityType: 'order',
+        entityId: id,
+        details: {
+          from: existing.status,
+          to: status,
+        },
+      })
     }
 
     return NextResponse.json({ order })
   } catch (error) {
-    console.error('Order PUT error:', error)
-    return NextResponse.json(
-      { error: 'Failed to update order' },
-      { status: 500 }
-    )
+    return handleApiError('Order PUT', error)
   }
 }

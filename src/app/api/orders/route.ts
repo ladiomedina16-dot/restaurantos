@@ -2,32 +2,27 @@
 // /api/orders — Order management
 // GET  /api/orders       → List orders (requires orders:read)
 // POST /api/orders       → Create order (requires orders:create)
+// Multi-restaurant scoped, Zod validated, audit logged
 // ============================================================
 
 import { db } from '@/lib/db'
 import { NextResponse } from 'next/server'
-import { authenticateAndAuthorize } from '@/lib/auth'
+import { authenticateAndAuthorize, requireRestaurantScope } from '@/lib/auth'
+import { validateInput, createOrderSchema } from '@/lib/validations'
+import { createAuditLog } from '@/lib/audit'
+import { handleApiError } from '@/lib/errors'
 import { emitOrderCreated } from '@/lib/realtime'
-
-interface OrderItemInput {
-  productId: string
-  quantity: number
-  notes?: string
-  modifiers?: string[] // e.g. ["sin hielo", "poco hecho"]
-}
-
-interface CreateOrderInput {
-  tableId: string
-  clientId?: string
-  notes?: string
-  items: OrderItemInput[]
-}
 
 // ─── GET /api/orders ────────────────────────────────────────
 
 export async function GET(request: Request) {
   const auth = authenticateAndAuthorize(request, 'orders:read')
   if ('error' in auth) return auth.error
+  const { user } = auth
+
+  const scope = requireRestaurantScope(user, request)
+  if ('error' in scope) return scope.error
+  const { restaurantId } = scope
 
   try {
     const { searchParams } = new URL(request.url)
@@ -35,7 +30,7 @@ export async function GET(request: Request) {
     const tableId = searchParams.get('tableId')
     const clientId = searchParams.get('clientId')
 
-    const where: Record<string, unknown> = {}
+    const where: Record<string, unknown> = { restaurantId }
 
     if (status) {
       // Support comma-separated statuses for kitchen KDS
@@ -76,11 +71,7 @@ export async function GET(request: Request) {
 
     return NextResponse.json({ orders })
   } catch (error) {
-    console.error('Orders GET error:', error)
-    return NextResponse.json(
-      { error: 'Failed to fetch orders' },
-      { status: 500 }
-    )
+    return handleApiError('Orders GET', error)
   }
 }
 
@@ -91,26 +82,22 @@ export async function POST(request: Request) {
   if ('error' in auth) return auth.error
   const { user } = auth
 
+  const scope = requireRestaurantScope(user, request)
+  if ('error' in scope) return scope.error
+  const { restaurantId } = scope
+
   try {
     const body = await request.json()
-    const { tableId, clientId, notes, items } = body as CreateOrderInput
 
-    if (!tableId) {
-      return NextResponse.json(
-        { error: 'Table ID is required' },
-        { status: 400 }
-      )
-    }
+    // Zod validation
+    const validation = validateInput(createOrderSchema, body)
+    if (!validation.success) return validation.error
+    const { tableId, clientId, notes, items } = validation.data
 
-    if (!items || items.length === 0) {
-      return NextResponse.json(
-        { error: 'Order must have at least one item' },
-        { status: 400 }
-      )
-    }
-
-    // Validate table exists
-    const table = await db.table.findUnique({ where: { id: tableId } })
+    // Validate table exists AND belongs to this restaurant
+    const table = await db.table.findFirst({
+      where: { id: tableId, restaurantId },
+    })
     if (!table) {
       return NextResponse.json(
         { error: 'Table not found' },
@@ -118,9 +105,11 @@ export async function POST(request: Request) {
       )
     }
 
-    // Validate client if provided
+    // Validate client if provided — must belong to this restaurant
     if (clientId) {
-      const client = await db.client.findUnique({ where: { id: clientId } })
+      const client = await db.client.findFirst({
+        where: { id: clientId, restaurantId },
+      })
       if (!client) {
         return NextResponse.json(
           { error: 'Client not found' },
@@ -130,9 +119,10 @@ export async function POST(request: Request) {
     }
 
     // Fetch all products in the order (prices from DB only)
+    // Only products belonging to this restaurant
     const productIds = items.map((item) => item.productId)
     const products = await db.product.findMany({
-      where: { id: { in: productIds } },
+      where: { id: { in: productIds }, restaurantId },
     })
 
     // Validate all products exist and have sufficient stock
@@ -189,6 +179,7 @@ export async function POST(request: Request) {
           total: subtotal,
           status: 'pending',
           createdById: user.userId,
+          restaurantId,
           items: {
             create: orderItemsData,
           },
@@ -238,12 +229,24 @@ export async function POST(request: Request) {
     // Emit real-time event after successful order creation
     await emitOrderCreated(order)
 
+    // Audit log
+    await createAuditLog({
+      restaurantId,
+      userId: user.userId,
+      action: 'order_created',
+      entityType: 'order',
+      entityId: order.id,
+      details: {
+        tableId,
+        clientId: clientId ?? null,
+        itemCount: items.length,
+        subtotal,
+        total: subtotal,
+      },
+    })
+
     return NextResponse.json({ order }, { status: 201 })
   } catch (error) {
-    console.error('Orders POST error:', error)
-    return NextResponse.json(
-      { error: 'Failed to create order' },
-      { status: 500 }
-    )
+    return handleApiError('Orders POST', error)
   }
 }

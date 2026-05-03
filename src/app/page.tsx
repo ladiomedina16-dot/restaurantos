@@ -182,7 +182,7 @@ const categoryOrder = ['bebida', 'tapa_fria', 'tapa_caliente', 'montadito', 'rac
 
 interface AuthContextType {
   authToken: string | null
-  currentUser: { userId: string; username: string; role: string; name: string } | null
+  currentUser: { userId: string; username: string; role: string; name: string; restaurantId?: string } | null
   authHeaders: (contentType?: boolean) => Record<string, string>
   handleFetchResponse: (res: Response) => boolean
   logout: () => void
@@ -1275,7 +1275,7 @@ export default function RestaurantPage() {
 
   // ─── Auth State ────────────────────────────────────────────────
   const [authToken, setAuthToken] = useState<string | null>(null)
-  const [currentUser, setCurrentUser] = useState<{ userId: string; username: string; role: string; name: string } | null>(null)
+  const [currentUser, setCurrentUser] = useState<{ userId: string; username: string; role: string; name: string; restaurantId?: string } | null>(null)
   const [loginUsername, setLoginUsername] = useState('')
   const [loginPassword, setLoginPassword] = useState('')
   const [loginError, setLoginError] = useState('')
@@ -1312,7 +1312,7 @@ export default function RestaurantPage() {
                 .then((r) => r.json())
                 .then((data) => {
                   if (data.token) {
-                    const userData = { userId: data.user.id, username: data.user.username, name: data.user.name, role: data.user.role }
+                    const userData = { userId: data.user.id, username: data.user.username, name: data.user.name, role: data.user.role, restaurantId: data.user.restaurantId }
                     setAuthToken(data.token)
                     setCurrentUser(userData)
                     localStorage.setItem('restaurantos_auth', JSON.stringify({ token: data.token, refreshToken: data.refreshToken, user: userData }))
@@ -1338,8 +1338,9 @@ export default function RestaurantPage() {
     const headers: Record<string, string> = {}
     if (contentType) headers['Content-Type'] = 'application/json'
     if (authToken) headers['Authorization'] = `Bearer ${authToken}`
+    if (currentUser?.restaurantId) headers['X-Restaurant-Id'] = currentUser.restaurantId
     return headers
-  }, [authToken])
+  }, [authToken, currentUser?.restaurantId])
 
   const handleFetchResponse = useCallback((res: Response) => {
     if (res.status === 401) {
@@ -1370,7 +1371,7 @@ export default function RestaurantPage() {
       })
       const data = await res.json()
       if (res.ok) {
-        const userData = { userId: data.user.id, username: data.user.username, name: data.user.name, role: data.user.role }
+        const userData = { userId: data.user.id, username: data.user.username, name: data.user.name, role: data.user.role, restaurantId: data.user.restaurantId }
         setAuthToken(data.token)
         setCurrentUser(userData)
         localStorage.setItem('restaurantos_auth', JSON.stringify({ token: data.token, refreshToken: data.refreshToken, user: userData }))

@@ -2,11 +2,15 @@
 // /api/orders/[id]/pay — Close the bill
 // POST /api/orders/[id]/pay → Apply 5ª gratis, CRM points, create Payment, free table
 // Requires orders:pay permission (caja/admin)
+// Multi-restaurant scoped, Zod validated, audit logged
 // ============================================================
 
 import { db } from '@/lib/db'
 import { NextResponse } from 'next/server'
-import { authenticateAndAuthorize } from '@/lib/auth'
+import { authenticateAndAuthorize, requireRestaurantScope } from '@/lib/auth'
+import { validateInput, payOrderSchema } from '@/lib/validations'
+import { createAuditLog } from '@/lib/audit'
+import { handleApiError } from '@/lib/errors'
 import { emitTableCleared, emitOrderStatusChanged } from '@/lib/realtime'
 
 export async function POST(
@@ -17,21 +21,18 @@ export async function POST(
   if ('error' in auth) return auth.error
   const { user } = auth
 
+  const scope = requireRestaurantScope(user, request)
+  if ('error' in scope) return scope.error
+  const { restaurantId } = scope
+
   try {
     const { id } = await params
     const body = await request.json()
-    const { applyDiscount = true, paymentMethod = 'efectivo' } = body as {
-      applyDiscount?: boolean
-      paymentMethod?: 'efectivo' | 'tarjeta'
-    }
 
-    // Validate payment method
-    if (!['efectivo', 'tarjeta'].includes(paymentMethod)) {
-      return NextResponse.json(
-        { error: 'Método de pago inválido. Use "efectivo" o "tarjeta".' },
-        { status: 400 }
-      )
-    }
+    // Zod validation
+    const validation = validateInput(payOrderSchema, body)
+    if (!validation.success) return validation.error
+    const { applyDiscount = true, paymentMethod = 'efectivo' } = validation.data
 
     const existing = await db.order.findUnique({
       where: { id },
@@ -42,7 +43,8 @@ export async function POST(
       },
     })
 
-    if (!existing) {
+    // Data isolation: return 404 if not found or wrong restaurant
+    if (!existing || existing.restaurantId !== restaurantId) {
       return NextResponse.json({ error: 'Pedido no encontrado' }, { status: 404 })
     }
 
@@ -110,10 +112,11 @@ export async function POST(
         },
       })
 
-      // Liberar mesa si no hay otros pedidos activos
+      // Liberar mesa si no hay otros pedidos activos (scoped to restaurant)
       const activeOrdersCount = await tx.order.count({
         where: {
           tableId: existing.tableId,
+          restaurantId,
           status: { notIn: ['paid', 'cancelled'] },
           id: { not: id },
         },
@@ -148,6 +151,24 @@ export async function POST(
       await emitTableCleared(existing.tableId, existing.table.number)
     }
 
+    // Audit log
+    await createAuditLog({
+      restaurantId,
+      userId: user.userId,
+      action: 'payment_processed',
+      entityType: 'payment',
+      entityId: id,
+      details: {
+        subtotal,
+        discount,
+        totalAfterDiscount,
+        paymentMethod,
+        freeDrinkCount,
+        pointsEarned,
+        clientId: existing.clientId,
+      },
+    })
+
     return NextResponse.json({
       order: result.updatedOrder,
       payment: {
@@ -163,10 +184,6 @@ export async function POST(
       },
     })
   } catch (error) {
-    console.error('Order pay error:', error)
-    return NextResponse.json(
-      { error: 'Error al procesar el pago' },
-      { status: 500 }
-    )
+    return handleApiError('Order pay', error)
   }
 }

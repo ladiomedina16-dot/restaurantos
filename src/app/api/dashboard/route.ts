@@ -1,17 +1,23 @@
 // ============================================================
 // /api/dashboard — Dashboard analytics
 // GET /api/dashboard → Dashboard data (requires dashboard:read)
+// Now filters by restaurantId for multi-tenant isolation
 // ============================================================
 
 import { db } from '@/lib/db'
-import { NextResponse } from 'next/server'
-import { authenticateAndAuthorize } from '@/lib/auth'
+import { authenticateAndAuthorize, requireRestaurantScope } from '@/lib/auth'
+import { handleApiError } from '@/lib/errors'
 
 export async function GET(request: Request) {
   const auth = authenticateAndAuthorize(request, 'dashboard:read')
   if ('error' in auth) return auth.error
+  const { user } = auth
 
   try {
+    const scope = requireRestaurantScope(user, request)
+    if ('error' in scope) return scope.error
+    const { restaurantId } = scope
+
     // Get today's date range
     const now = new Date()
     const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate())
@@ -20,6 +26,7 @@ export async function GET(request: Request) {
     // Total orders today
     const totalOrdersToday = await db.order.count({
       where: {
+        restaurantId,
         createdAt: {
           gte: startOfDay,
           lt: endOfDay,
@@ -30,6 +37,7 @@ export async function GET(request: Request) {
     // Revenue today (sum of totals for paid/completed orders)
     const todayOrders = await db.order.findMany({
       where: {
+        restaurantId,
         createdAt: {
           gte: startOfDay,
           lt: endOfDay,
@@ -44,6 +52,7 @@ export async function GET(request: Request) {
     // Occupied tables count
     const occupiedTables = await db.table.count({
       where: {
+        restaurantId,
         status: 'occupied',
         active: true,
       },
@@ -51,12 +60,13 @@ export async function GET(request: Request) {
 
     // Total active tables
     const totalActiveTables = await db.table.count({
-      where: { active: true },
+      where: { restaurantId, active: true },
     })
 
     // Low stock products (stock <= 5)
     const lowStockProducts = await db.product.findMany({
       where: {
+        restaurantId,
         active: true,
         stock: { lte: 5 },
       },
@@ -69,6 +79,7 @@ export async function GET(request: Request) {
       by: ['productId'],
       where: {
         order: {
+          restaurantId,
           createdAt: {
             gte: startOfDay,
             lt: endOfDay,
@@ -105,6 +116,7 @@ export async function GET(request: Request) {
 
     // Recent orders
     const recentOrders = await db.order.findMany({
+      where: { restaurantId },
       take: 10,
       orderBy: { createdAt: 'desc' },
       include: {
@@ -123,22 +135,23 @@ export async function GET(request: Request) {
         status: true,
       },
       where: {
+        restaurantId,
         status: { notIn: ['paid', 'cancelled'] },
       },
     })
 
     // Total products and categories
     const totalActiveProducts = await db.product.count({
-      where: { active: true },
+      where: { restaurantId, active: true },
     })
 
     const categories = await db.product.groupBy({
       by: ['category'],
-      where: { active: true },
+      where: { restaurantId, active: true },
       _count: { category: true },
     })
 
-    return NextResponse.json({
+    return Response.json({
       stats: {
         totalOrdersToday,
         revenueToday: Math.round(revenueToday * 100) / 100,
@@ -160,10 +173,6 @@ export async function GET(request: Request) {
       })),
     })
   } catch (error) {
-    console.error('Dashboard GET error:', error)
-    return NextResponse.json(
-      { error: 'Failed to fetch dashboard data' },
-      { status: 500 }
-    )
+    return handleApiError('Dashboard GET', error)
   }
 }

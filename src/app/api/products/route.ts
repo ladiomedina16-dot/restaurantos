@@ -1,26 +1,32 @@
 // ============================================================
-// /api/products — Product management
-// GET  /api/products   → List products (any authenticated user)
-// POST /api/products   → Create product (requires products:create)
+// /api/products — Product management (multi-restaurant)
+// GET  /api/products   → List products (any authenticated user, scoped to restaurant)
+// POST /api/products   → Create product (requires products:create, scoped to restaurant)
 // ============================================================
 
 import { db } from '@/lib/db'
 import { NextResponse } from 'next/server'
-import { authenticateAndAuthorize, authenticateRequest } from '@/lib/auth'
+import { authenticateAndAuthorize, requireRestaurantScope } from '@/lib/auth'
+import { createProductSchema, validateInput } from '@/lib/validations'
+import { createAuditLog } from '@/lib/audit'
+import { handleApiError } from '@/lib/errors'
 
 // ─── GET /api/products ──────────────────────────────────────
 
 export async function GET(request: Request) {
-  // Any authenticated user can read products
-  const auth = authenticateRequest(request)
-  if (!auth.success) return auth.response
+  const auth = authenticateAndAuthorize(request, 'products:read')
+  if ('error' in auth) return auth.error
+
+  const scope = requireRestaurantScope(auth.user, request)
+  if ('error' in scope) return scope.error
+  const { restaurantId } = scope
 
   try {
     const { searchParams } = new URL(request.url)
     const category = searchParams.get('category')
     const active = searchParams.get('active')
 
-    const where: Record<string, unknown> = {}
+    const where: Record<string, unknown> = { restaurantId }
 
     if (category) {
       where.category = category
@@ -37,11 +43,7 @@ export async function GET(request: Request) {
 
     return NextResponse.json({ products })
   } catch (error) {
-    console.error('Products GET error:', error)
-    return NextResponse.json(
-      { error: 'Failed to fetch products' },
-      { status: 500 }
-    )
+    return handleApiError('Products GET', error)
   }
 }
 
@@ -51,48 +53,53 @@ export async function POST(request: Request) {
   const auth = authenticateAndAuthorize(request, 'products:create')
   if ('error' in auth) return auth.error
 
+  const scope = requireRestaurantScope(auth.user, request)
+  if ('error' in scope) return scope.error
+  const { restaurantId } = scope
+
   try {
     const body = await request.json()
-    const { name, description, price, category, stock, imageUrl } = body as {
-      name: string
-      description?: string
-      price: number
-      category?: string
-      stock?: number
-      imageUrl?: string
-    }
 
-    if (!name || price === undefined || price === null) {
-      return NextResponse.json(
-        { error: 'Name and price are required' },
-        { status: 400 }
-      )
-    }
+    const validation = validateInput(createProductSchema, body)
+    if (!validation.success) return validation.error
 
-    if (price < 0) {
+    const { name, description, price, category, stock, imageUrl } = validation.data
+
+    // Check product name uniqueness per restaurant
+    const existing = await db.product.findUnique({
+      where: { name_restaurantId: { name, restaurantId } },
+    })
+
+    if (existing) {
       return NextResponse.json(
-        { error: 'Price cannot be negative' },
-        { status: 400 }
+        { error: 'Ya existe un producto con este nombre en este restaurante' },
+        { status: 409 }
       )
     }
 
     const product = await db.product.create({
       data: {
         name,
-        description: description ?? '',
-        price: parseFloat(String(price)),
-        category: category ?? 'general',
-        stock: stock ?? 0,
-        imageUrl: imageUrl ?? '',
+        description,
+        price,
+        category,
+        stock,
+        imageUrl,
+        restaurantId,
       },
+    })
+
+    await createAuditLog({
+      restaurantId,
+      userId: auth.user.userId,
+      action: 'product_created',
+      entityType: 'product',
+      entityId: product.id,
+      details: { name: product.name, price: product.price },
     })
 
     return NextResponse.json({ product }, { status: 201 })
   } catch (error) {
-    console.error('Products POST error:', error)
-    return NextResponse.json(
-      { error: 'Failed to create product' },
-      { status: 500 }
-    )
+    return handleApiError('Products POST', error)
   }
 }
