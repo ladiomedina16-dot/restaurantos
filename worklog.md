@@ -1,36 +1,32 @@
-# RestaurantOS — Worklog
+# RestaurantOS Worklog
 
 ---
 Task ID: 1
-Agent: Main
-Task: Adjust RestaurantOS with real initial data, super_admin, zone-based permissions, and Sevillian menu
+Agent: Main Agent
+Task: Prepare RestaurantOS for GitHub + Vercel deployment
 
 Work Log:
-- Added `zone` field (String?, optional) to User model in `prisma/schema.prisma` for zone-based camarero assignments
-- Completely rewrote `prisma/seed.ts` with:
-  - Clean slate deletion of all existing data before seeding
-  - Single restaurant: "La Carta de Sevilla" at Calle Betis 42, Triana, Sevilla
-  - 8 users with clear credentials and zone assignments
-  - 52 products: 15 bebidas, 8 tapas frías, 9 tapas calientes, 6 montaditos, 8 raciones (incl. 2 specials), 6 postres
-  - 34 tables: 6 barra (1-6), 14 salón (11-24), 14 terraza (31-44)
-  - 5 CRM clients with loyalty points
-- Updated `src/lib/auth.ts`:
-  - Added `zone` to JwtPayload interface
-  - Added `getZoneFilter()` helper for zone-based API filtering
-  - Added 'reportes' tab to `canAccessTab()`
-- Updated `src/lib/validations.ts`: Added `zone` field to createUserSchema
-- Updated `src/app/api/auth/route.ts`: Zone included in JWT payload, login response, refresh response, and /me endpoint
-- Updated `src/app/api/tables/route.ts`: Zone filtering for camareros via `getZoneFilter()`
-- Updated `src/app/api/orders/route.ts`: Zone filtering for camareros (filter by table.zone)
-- Updated `src/app/api/users/route.ts`: Zone field in user creation, listing, and updates
-- Updated `src/app/page.tsx`: Zone included in frontend userData objects
-- Fixed `src/lib/db.ts`: Detect stale SQLite DATABASE_URL and override with PostgreSQL URL from .env
-- Pushed schema to Supabase PostgreSQL and ran seed successfully
-- Lint passes with no errors
+- Replaced Socket.io with HTTP polling for Vercel compatibility
+- Updated src/lib/socket.ts: Drop-in PollingSocket class that makes .on()/.off() no-ops
+- Updated src/lib/realtime.ts: All emit functions are now no-ops (API compatibility preserved)
+- Updated src/app/page.tsx: Removed all getSocket() calls, reduced polling intervals (cocina: 5s, camarero/caja: 8s)
+- Removed socket.io-client from package.json
+- Removed hardcoded Supabase credentials from src/lib/db.ts (reads from .env at runtime)
+- Added SQLite URL override in db.ts and seed.ts (reads .env file manually when system env has stale file: URL)
+- Updated next.config.ts: Removed `output: "standalone"` for Vercel
+- Updated prisma/seed.ts: super_admin mustChangePassword: true
+- Created .env.example with all required variables (DATABASE_URL, DIRECT_URL, JWT_SECRET, JWT_REFRESH_SECRET, API_SECRET, NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY)
+- Updated .gitignore: Added mini-services/, examples/, download/, .zscripts/, Caddyfile, start.sh, db/, agent-ctx/, skills/
+- Updated .env: Removed SOCKET_SERVER_URL, added Supabase keys
+- Ran prisma generate successfully
+- Ran seed successfully: 8 users, 52 products, 34 tables, 5 clients
+- Lint passes with zero errors
 
 Stage Summary:
-- All code changes complete and linting clean
-- Database seeded with real Sevillian menu and zone-based users
-- Zone-based permission filtering active in tables and orders APIs
-- Server tested: superadmin, admin, camarero_terraza logins all work via Caddy proxy
-- JWT tokens now include zone field for camareros
+- Socket.io fully removed and replaced with HTTP polling (Vercel-compatible)
+- No hardcoded secrets in source code
+- .env.example provides all required variables for Vercel
+- super_admin created: username=superadmin, password=Super2024! (must change on first login)
+- All users have mustChangePassword: true
+- Database seeded with complete Sevillian menu (52 products across 6 categories)
+- Project is ready for GitHub + Vercel deployment

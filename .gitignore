@@ -1,5 +1,3 @@
-# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
-
 # dependencies
 node_modules
 /.pnp
@@ -30,25 +28,56 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# env files (can opt-in for committing if needed)
-.env*
+# env files — NEVER commit secrets
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
 
 # vercel
 .vercel
 
-
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# local dev files
 local-*
 .claude
 .z-ai-config
 *.log
 dev.log
 dev.out.log
+server.log
+
+# test / prompt files
 test
 prompt
 
-server.log
-# Skills directory
+# Skills directory (not project code)
 /skills/
+
+# AI agent context
+/agent-ctx/
+
+# Legacy SQLite database
+/db/
+
+# Mini-services (not used on Vercel)
+/mini-services/
+
+# Examples
+/examples/
+
+# Download folder
+/download/
+
+# z-scripts (dev-only)
+/.zscripts/
+
+# Caddyfile (dev-only)
+Caddyfile
+
+# Start script (dev-only)
+start.sh

@@ -62,7 +62,6 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useRestaurantStore, type TabId } from '@/lib/store'
-import { getSocket } from '@/lib/socket'
 import { toast } from 'sonner'
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -291,18 +290,11 @@ function CamareroTab() {
       setLoading(false)
     }
     load()
-    const interval = setInterval(fetchTables, 10000)
+    const interval = setInterval(fetchTables, 8000)
     return () => clearInterval(interval)
   }, [fetchTables, fetchProducts])
 
-  // Socket: refresh tables on changes
-  useEffect(() => {
-    const socket = getSocket()
-    const handler = () => { fetchTables() }
-    socket.on('table-status-changed', handler)
-    socket.on('table-cleared', handler)
-    return () => { socket.off('table-status-changed', handler); socket.off('table-cleared', handler) }
-  }, [fetchTables])
+  // Polling: tables refresh via interval (Vercel-compatible, no Socket.io)
 
   const handleSelectTable = (table: TableItem) => {
     setSelectedTable(table)
@@ -683,7 +675,7 @@ function CocinaTab() {
 
   useEffect(() => {
     fetchOrders()
-    const interval = setInterval(fetchOrders, 30000)
+    const interval = setInterval(fetchOrders, 5000)
     return () => clearInterval(interval)
   }, [fetchOrders])
 
@@ -693,40 +685,7 @@ function CocinaTab() {
     return () => clearInterval(interval)
   }, [])
 
-  // Socket listeners
-  useEffect(() => {
-    const socket = getSocket()
-
-    const onOrderCreated = (data: { order: Order }) => {
-      setOrders((prev) => {
-        if (prev.some((o) => o.id === data.order.id)) return prev
-        return [data.order, ...prev]
-      })
-      toast.info(`Nuevo pedido - Mesa ${data.order.table?.number ?? '?'}`)
-    }
-
-    const onOrderStatusChanged = (data: { order: Order }) => {
-      if (data.order.status === 'ready' || data.order.status === 'paid' || data.order.status === 'cancelled') {
-        setOrders((prev) => prev.filter((o) => o.id !== data.order.id))
-      } else {
-        setOrders((prev) => prev.map((o) => o.id === data.order.id ? data.order : o))
-      }
-    }
-
-    const onOrderReady = (data: { order: Order }) => {
-      setOrders((prev) => prev.filter((o) => o.id !== data.order.id))
-    }
-
-    socket.on('order-created', onOrderCreated)
-    socket.on('order-status-changed', onOrderStatusChanged)
-    socket.on('order-ready', onOrderReady)
-
-    return () => {
-      socket.off('order-created', onOrderCreated)
-      socket.off('order-status-changed', onOrderStatusChanged)
-      socket.off('order-ready', onOrderReady)
-    }
-  }, [])
+  // Polling: cocina orders refresh via fast interval (Vercel-compatible, no Socket.io)
 
   const handleTerminar = async (order: Order) => {
     setFinishing(order.id)
@@ -971,7 +930,7 @@ function CajaTab() {
       setLoading(false)
     }
     load()
-    const interval = setInterval(() => { fetchTables(); fetchActiveOrders() }, 15000)
+    const interval = setInterval(() => { fetchTables(); fetchActiveOrders() }, 8000)
     return () => clearInterval(interval)
   }, [fetchTables, fetchActiveOrders, fetchCashSession])
 
@@ -981,25 +940,7 @@ function CajaTab() {
     return () => clearInterval(interval)
   }, [])
 
-  // Socket listeners
-  useEffect(() => {
-    const socket = getSocket()
-
-    const refresh = () => { fetchTables(); fetchActiveOrders() }
-    socket.on('order-created', refresh)
-    socket.on('order-ready', refresh)
-    socket.on('order-status-changed', refresh)
-    socket.on('table-cleared', refresh)
-    socket.on('table-status-changed', refresh)
-
-    return () => {
-      socket.off('order-created', refresh)
-      socket.off('order-ready', refresh)
-      socket.off('order-status-changed', refresh)
-      socket.off('table-cleared', refresh)
-      socket.off('table-status-changed', refresh)
-    }
-  }, [fetchTables, fetchActiveOrders])
+  // Polling: caja refreshes via interval (Vercel-compatible, no Socket.io)
 
   // Get orders for a table
   const getTableOrders = (tableId: string) =>
@@ -1961,37 +1902,11 @@ export default function RestaurantPage() {
     }
   }
 
-  // Socket connection + role-based room join
+  // Real-time status: always "connected" (polling mode, no Socket.io)
   useEffect(() => {
     if (!authToken) return
-    const socket = getSocket()
-
-    const onConnect = () => {
-      setRealtimeConnected(true)
-      if (currentUser?.role === 'cocina') {
-        socket.emit('join-room', 'kitchen')
-      } else if (currentUser?.role === 'caja') {
-        socket.emit('join-room', 'caja')
-      } else {
-        // admin, super_admin, encargado, camarero join admin room
-        socket.emit('join-room', 'admin')
-      }
-    }
-
-    socket.on('connect', onConnect)
-    socket.on('disconnect', () => {
-      setRealtimeConnected(false)
-    })
-
-    // If already connected
-    if (socket.connected) {
-      onConnect()
-    }
-
-    return () => {
-      socket.off('connect', onConnect)
-    }
-  }, [authToken, currentUser, setRealtimeConnected])
+    setRealtimeConnected(true)
+  }, [authToken, setRealtimeConnected])
 
   // Fetch restaurant info to check subscription status
   useEffect(() => {

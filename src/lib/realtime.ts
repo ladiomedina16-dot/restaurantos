@@ -1,103 +1,38 @@
 // ============================================================
 // Server-side real-time emission helper
-// API routes call this after successful DB operations
-// This sends events to the Socket.io server which broadcasts
-// to connected clients. Frontend NEVER emits broadcast events.
+// Vercel-compatible: No Socket.io server needed.
+// Real-time is handled by client-side HTTP polling.
+// This module is kept as a no-op for API route compatibility
+// (API routes still call emitOrderCreated etc., but they
+// simply do nothing — clients poll for updates instead).
 // ============================================================
 
-const SOCKET_SERVER_URL = process.env.SOCKET_SERVER_URL || 'http://localhost:3003'
-const API_SECRET = process.env.API_SECRET || 'rst-os-api-s3cr3t-2024'
-
-interface EmitOptions {
-  event: string
-  payload: unknown
-  rooms?: string[]
-}
-
 /**
- * Emit a real-time event from the server (API route) to the Socket.io server.
- * This is the ONLY way broadcast events should be triggered.
- * Frontend clients can only LISTEN, never emit.
+ * No-op: Previously emitted to Socket.io server.
+ * Now clients use HTTP polling for updates.
  */
-export async function emitRealtimeEvent({ event, payload, rooms }: EmitOptions): Promise<void> {
-  try {
-    const res = await fetch(`${SOCKET_SERVER_URL}/emit`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        event,
-        payload,
-        rooms,
-        secret: API_SECRET,
-      }),
-    })
-
-    if (!res.ok) {
-      console.error(`[RT Emit] Failed to emit ${event}: ${res.status}`)
-    }
-  } catch (error) {
-    console.error(`[RT Emit] Error emitting ${event}:`, error)
-  }
+async function emitRealtimeEventNoOp(_opts: { event: string; payload: unknown; rooms?: string[] }): Promise<void> {
+  // No-op: polling replaces real-time push
 }
 
-// ─── Pre-built event emitters ───────────────────────────────
+// ─── Pre-built event emitters (no-op, kept for API compatibility) ──
 
-export async function emitOrderCreated(order: unknown) {
-  return emitRealtimeEvent({
-    event: 'order-created',
-    payload: {
-      type: 'created',
-      order,
-      timestamp: new Date().toISOString(),
-    },
-    rooms: ['kitchen', 'admin', 'bar', 'caja'],
-  })
+export async function emitOrderCreated(_order: unknown) {
+  return emitRealtimeEventNoOp({ event: 'order-created', payload: _order, rooms: ['kitchen', 'admin', 'bar', 'caja'] })
 }
 
-export async function emitOrderStatusChanged(order: unknown) {
-  return emitRealtimeEvent({
-    event: 'order-status-changed',
-    payload: {
-      type: 'status_changed',
-      order,
-      timestamp: new Date().toISOString(),
-    },
-    rooms: ['kitchen', 'admin', 'bar', 'floor', 'caja'],
-  })
+export async function emitOrderStatusChanged(_order: unknown) {
+  return emitRealtimeEventNoOp({ event: 'order-status-changed', payload: _order, rooms: ['kitchen', 'admin', 'bar', 'floor', 'caja'] })
 }
 
-export async function emitOrderReady(order: unknown) {
-  return emitRealtimeEvent({
-    event: 'order-ready',
-    payload: {
-      type: 'ready',
-      order,
-      timestamp: new Date().toISOString(),
-    },
-    rooms: ['floor', 'admin', 'bar', 'caja', 'kitchen'],
-  })
+export async function emitOrderReady(_order: unknown) {
+  return emitRealtimeEventNoOp({ event: 'order-ready', payload: _order, rooms: ['floor', 'admin', 'bar', 'caja', 'kitchen'] })
 }
 
-export async function emitTableCleared(tableId: string, tableNumber: number) {
-  return emitRealtimeEvent({
-    event: 'table-cleared',
-    payload: {
-      tableId,
-      tableNumber,
-      timestamp: new Date().toISOString(),
-    },
-    rooms: ['admin', 'floor', 'bar', 'caja', 'kitchen'],
-  })
+export async function emitTableCleared(_tableId: string, _tableNumber: number) {
+  return emitRealtimeEventNoOp({ event: 'table-cleared', payload: { tableId: _tableId, tableNumber: _tableNumber }, rooms: ['admin', 'floor', 'bar', 'caja', 'kitchen'] })
 }
 
-export async function emitTableStatusChanged(table: unknown) {
-  return emitRealtimeEvent({
-    event: 'table-status-changed',
-    payload: {
-      type: 'status_changed',
-      table,
-      timestamp: new Date().toISOString(),
-    },
-    rooms: ['admin', 'floor', 'bar', 'caja'],
-  })
+export async function emitTableStatusChanged(_table: unknown) {
+  return emitRealtimeEventNoOp({ event: 'table-status-changed', payload: _table, rooms: ['admin', 'floor', 'bar', 'caja'] })
 }

@@ -1,5 +1,31 @@
-// Load .env before any other imports (ESM hoisting safe)
+// Load .env BEFORE any other imports (ESM hoisting safe)
 import 'dotenv/config'
+
+// Fix: System env may have a stale SQLite DATABASE_URL from initial setup.
+// If the URL starts with "file:", override it with the PostgreSQL URL from .env.
+// dotenv doesn't override existing env vars, so we do it manually.
+import { readFileSync } from 'fs'
+import { resolve } from 'path'
+
+if (process.env.DATABASE_URL?.startsWith('file:')) {
+  try {
+    const envContent = readFileSync(resolve(process.cwd(), '.env'), 'utf8')
+    const pgUrlMatch = envContent.match(/^DATABASE_URL="?(postgresql:\/\/[^"\n]+)"?/m)
+    if (pgUrlMatch) {
+      process.env.DATABASE_URL = pgUrlMatch[1]
+      console.log('📋 Overrode SQLite DATABASE_URL with PostgreSQL from .env')
+    }
+  } catch { /* ignore */ }
+}
+if (process.env.DIRECT_URL?.startsWith('file:')) {
+  try {
+    const envContent = readFileSync(resolve(process.cwd(), '.env'), 'utf8')
+    const pgUrlMatch = envContent.match(/^DIRECT_URL="?(postgresql:\/\/[^"\n]+)"?/m)
+    if (pgUrlMatch) {
+      process.env.DIRECT_URL = pgUrlMatch[1]
+    }
+  } catch { /* ignore */ }
+}
 
 import { db } from '../src/lib/db'
 import bcrypt from 'bcryptjs'
@@ -55,7 +81,7 @@ async function seed() {
       name: 'Super Administrador',
       role: 'super_admin',
       active: true,
-      mustChangePassword: false,
+      mustChangePassword: true, // ⚠️ Must change on first login
       zone: null,
       restaurantId: null,
     },
@@ -66,7 +92,7 @@ async function seed() {
       name: 'Antonio Reyes — Administrador',
       role: 'admin',
       active: true,
-      mustChangePassword: true, // debe cambiar contraseña al primer login
+      mustChangePassword: true,
       zone: null,
       restaurantId: r1,
     },
@@ -251,10 +277,6 @@ async function seed() {
   // ═══════════════════════════════════════════════════════════
   // MESAS POR ZONA
   // ═══════════════════════════════════════════════════════════
-  // Barra: mesas 1-6 (capacidad 2)
-  // Salón (main): mesas 11-24 (capacidad 4)
-  // Terraza: mesas 31-44 (capacidad 4)
-
   const tablesData = [
     // Barra (6 mesas)
     ...Array.from({ length: 6 }, (_, i) => ({
@@ -320,6 +342,7 @@ async function seed() {
   console.log(`  📊 encargado     │ user: encargado          │ pass: ${PW_STAFF}`)
   console.log(`  💰 caja          │ user: caja               │ pass: ${PW_STAFF}`)
   console.log('  ─────────────────────────────────────────────')
+  console.log('\n  ⚠️  TODOS los usuarios deben cambiar contraseña en el primer login')
   console.log('\n  📋 PERMISOS POR ZONA:')
   console.log('  ─────────────────────────────────────────────')
   console.log('  camarero_terraza → Solo TERRAZA (mesas 31-44)')
