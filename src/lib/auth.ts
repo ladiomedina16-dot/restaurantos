@@ -6,6 +6,7 @@
 import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
 import { NextResponse } from 'next/server'
+import { db } from '@/lib/db'
 
 const JWT_SECRET = process.env.JWT_SECRET || 'rst-os-dev-jwt-fallback'
 const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || 'rst-os-dev-refresh-fallback'
@@ -301,4 +302,54 @@ export function requireRestaurantScope(user: JwtPayload, request: Request): { re
   }
 
   return { restaurantId: user.restaurantId }
+}
+
+/**
+ * SaaS Subscription Guard: Check if the restaurant has an active subscription.
+ * Returns { active: true } if the subscription is OK, or an error NextResponse if suspended.
+ * super_admin bypasses this check.
+ */
+export async function requireActiveSubscription(
+  restaurantId: string,
+  userRole: string
+): Promise<{ active: boolean } | { error: NextResponse }> {
+  // super_admin always bypasses subscription checks
+  if (userRole === 'super_admin') {
+    return { active: true }
+  }
+
+  try {
+    const restaurant = await db.restaurant.findUnique({
+      where: { id: restaurantId },
+      select: { subscriptionStatus: true },
+    })
+
+    if (!restaurant) {
+      return {
+        error: NextResponse.json(
+          { error: 'Restaurante no encontrado.' },
+          { status: 404 }
+        ),
+      }
+    }
+
+    if (restaurant.subscriptionStatus === 'suspended') {
+      return {
+        error: NextResponse.json(
+          { error: 'Restaurante suspendido. Contacte al administrador.' },
+          { status: 403 }
+        ),
+      }
+    }
+
+    return { active: true }
+  } catch (error) {
+    console.error('[AUTH] Error checking subscription:', error)
+    return {
+      error: NextResponse.json(
+        { error: 'Error al verificar la suscripción.' },
+        { status: 500 }
+      ),
+    }
+  }
 }

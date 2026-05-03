@@ -7,7 +7,7 @@
 
 import { db } from '@/lib/db'
 import { NextResponse } from 'next/server'
-import { authenticateAndAuthorize, requireRestaurantScope } from '@/lib/auth'
+import { authenticateAndAuthorize, requireRestaurantScope, requireActiveSubscription } from '@/lib/auth'
 import { validateInput, payOrderSchema } from '@/lib/validations'
 import { createAuditLog } from '@/lib/audit'
 import { handleApiError } from '@/lib/errors'
@@ -25,7 +25,26 @@ export async function POST(
   if ('error' in scope) return scope.error
   const { restaurantId } = scope
 
+  // SaaS Subscription Guard: block payment processing if restaurant is suspended
+  const subCheck = await requireActiveSubscription(restaurantId, user.role)
+  if ('error' in subCheck) return subCheck.error
+
   try {
+    // ─── Cash session guard ─────────────────────────────
+    // No payments allowed without an open cash session
+    const openSession = await db.cashSession.findFirst({
+      where: {
+        restaurantId,
+        status: 'open',
+      },
+    })
+    if (!openSession) {
+      return NextResponse.json(
+        { error: 'No hay sesión de caja abierta. Abre caja antes de cobrar.' },
+        { status: 400 }
+      )
+    }
+
     const { id } = await params
     const body = await request.json()
 
@@ -99,7 +118,7 @@ export async function POST(
         },
       })
 
-      // Create Payment record for audit trail
+      // Create Payment record for audit trail (linked to open cash session)
       await tx.payment.create({
         data: {
           orderId: id,
@@ -108,6 +127,7 @@ export async function POST(
           method: paymentMethod,
           discount,
           freeDrinks: freeDrinkCount,
+          cashSessionId: openSession.id,
           pointsEarned,
         },
       })

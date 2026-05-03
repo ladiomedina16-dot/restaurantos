@@ -15,21 +15,24 @@ datasource db {
 
 // ─── RESTAURANT (Multi-tenant root) ────────────────────────
 model Restaurant {
-  id        String   @id @default(cuid())
-  name      String
-  slug      String   @unique   // URL-friendly identifier
-  address   String   @default("")
-  phone     String   @default("")
-  active    Boolean  @default(true)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id                 String   @id @default(cuid())
+  name               String
+  slug               String   @unique   // URL-friendly identifier
+  address            String   @default("")
+  phone              String   @default("")
+  active             Boolean  @default(true)
+  subscriptionStatus String   @default("trial") // trial, active, suspended
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
 
-  users     User[]
-  products  Product[]
-  tables    Table[]
-  clients   Client[]
-  orders    Order[]
+  users        User[]
+  products     Product[]
+  tables       Table[]
+  clients      Client[]
+  orders       Order[]
   cashSessions CashSession[]
+
+  @@index([subscriptionStatus])
 }
 
 // ─── USUARIOS ──────────────────────────────────────────────
@@ -39,11 +42,12 @@ model User {
   username     String    @unique
   passwordHash String    // bcrypt hashed
   name         String    @default("")   // display name
-  role         String    @default("camarero") // super_admin, admin, encargado, camarero, cocina, caja
-  active       Boolean   @default(true)
-  restaurantId String?   // null for super_admin (access to all)
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
+  role              String    @default("camarero") // super_admin, admin, encargado, camarero, cocina, caja
+  active            Boolean   @default(true)
+  mustChangePassword Boolean  @default(false) // force password change on first login
+  restaurantId      String?   // null for super_admin (access to all)
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
 
   restaurant Restaurant? @relation(fields: [restaurantId], references: [id])
 

@@ -40,6 +40,10 @@ import {
   CheckCheck,
   X,
   LogOut,
+  Printer,
+  BarChart3,
+  Lock,
+  AlertTriangle,
 } from 'lucide-react'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { Button } from '@/components/ui/button'
@@ -182,7 +186,7 @@ const categoryOrder = ['bebida', 'tapa_fria', 'tapa_caliente', 'montadito', 'rac
 
 interface AuthContextType {
   authToken: string | null
-  currentUser: { userId: string; username: string; role: string; name: string; restaurantId?: string } | null
+  currentUser: { userId: string; username: string; role: string; name: string; restaurantId?: string; mustChangePassword?: boolean } | null
   authHeaders: (contentType?: boolean) => Record<string, string>
   handleFetchResponse: (res: Response) => boolean
   logout: () => void
@@ -194,6 +198,32 @@ function useAuth() {
   const ctx = useContext(AuthContext)
   if (!ctx) throw new Error('useAuth must be used within AuthProvider')
   return ctx
+}
+
+// ─── Print Helper ──────────────────────────────────────────────────────────
+
+const handlePrintTicket = async (type: 'kitchen' | 'bar' | 'receipt', orderId: string, authHeaders: (contentType?: boolean) => Record<string, string>) => {
+  try {
+    const res = await fetch('/api/print', {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ type, orderId }),
+    })
+    if (res.ok) {
+      const { html } = await res.json()
+      const printWindow = window.open('', '_blank', 'width=320,height=600')
+      if (printWindow) {
+        printWindow.document.write(html)
+        printWindow.document.close()
+        printWindow.focus()
+        printWindow.print()
+      }
+    } else {
+      toast.error('Error al imprimir ticket')
+    }
+  } catch {
+    toast.error('Error al imprimir ticket')
+  }
 }
 
 // ─── CAMARERO TAB ───────────────────────────────────────────────────────────
@@ -839,7 +869,27 @@ function CocinaTab() {
                 </p>
               )}
 
-              {/* Terminar button */}
+              {/* Terminar button + Print buttons */}
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-14 border-gray-600 text-white hover:bg-gray-700"
+                  onClick={() => handlePrintTicket('kitchen', order.id, authHeaders)}
+                >
+                  <Printer className="size-5 mr-1" />
+                  Cocina
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-14 border-gray-600 text-white hover:bg-gray-700"
+                  onClick={() => handlePrintTicket('bar', order.id, authHeaders)}
+                >
+                  <Wine className="size-5 mr-1" />
+                  Barra
+                </Button>
+              </div>
               <Button
                 className="w-full h-14 text-lg font-bold bg-green-600 hover:bg-green-700 text-white"
                 onClick={() => handleTerminar(order)}
@@ -868,6 +918,15 @@ function CajaTab() {
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<'efectivo' | 'tarjeta'>('efectivo')
   const { authHeaders, handleFetchResponse } = useAuth()
 
+  // ─── Cash Session State ──────────────────────────────────────
+  const [cashSession, setCashSession] = useState<any>(null)
+  const [showOpenCashDialog, setShowOpenCashDialog] = useState(false)
+  const [showCloseCashDialog, setShowCloseCashDialog] = useState(false)
+  const [openingCashInput, setOpeningCashInput] = useState('')
+  const [closingCashInput, setClosingCashInput] = useState('')
+  const [cashSessionLoading, setCashSessionLoading] = useState(false)
+  const [cashCloseSummary, setCashCloseSummary] = useState<any>(null)
+
   const fetchTables = useCallback(async () => {
     try {
       const res = await fetch('/api/tables', { headers: authHeaders(false) })
@@ -890,15 +949,31 @@ function CajaTab() {
     }
   }, [authHeaders, handleFetchResponse])
 
+  const fetchCashSession = useCallback(async () => {
+    try {
+      const res = await fetch('/api/cash-sessions?current=true', { headers: authHeaders(false) })
+      if (handleFetchResponse(res) && res.ok) {
+        const json = await res.json()
+        if (json.sessions && json.sessions.length > 0) {
+          setCashSession(json.sessions[0])
+        } else if (json.cashSession) {
+          setCashSession(json.cashSession)
+        } else {
+          setCashSession(null)
+        }
+      }
+    } catch { /* silently fail */ }
+  }, [authHeaders, handleFetchResponse])
+
   useEffect(() => {
     const load = async () => {
-      await Promise.all([fetchTables(), fetchActiveOrders()])
+      await Promise.all([fetchTables(), fetchActiveOrders(), fetchCashSession()])
       setLoading(false)
     }
     load()
     const interval = setInterval(() => { fetchTables(); fetchActiveOrders() }, 15000)
     return () => clearInterval(interval)
-  }, [fetchTables, fetchActiveOrders])
+  }, [fetchTables, fetchActiveOrders, fetchCashSession])
 
   // Update time
   useEffect(() => {
@@ -959,6 +1034,10 @@ function CajaTab() {
 
   const handleCobrar = async () => {
     if (!selectedTableId || selectedOrders.length === 0) return
+    if (!cashSession) {
+      toast.error('Abre caja para poder cobrar')
+      return
+    }
     setPaying(true)
     try {
       // Pay each order
@@ -1165,10 +1244,31 @@ function CajaTab() {
               <Button
                 className="w-full h-16 text-xl font-bold bg-green-600 hover:bg-green-700 text-white"
                 onClick={handleCobrar}
-                disabled={paying || selectedOrders.length === 0}
+                disabled={paying || selectedOrders.length === 0 || !cashSession}
               >
                 <Euro className="size-6 mr-2" />
                 {paying ? 'Cobrando...' : 'COBRAR'}
+              </Button>
+
+              {!cashSession && (
+                <p className="text-sm text-red-600 text-center font-medium mt-1">
+                  Abre caja para poder cobrar
+                </p>
+              )}
+
+              {/* Print receipt button */}
+              <Button
+                variant="outline"
+                className="w-full h-12 mt-2"
+                onClick={() => {
+                  // Print receipt for the first selected order
+                  if (selectedOrders.length > 0) {
+                    handlePrintTicket('receipt', selectedOrders[0].id, authHeaders)
+                  }
+                }}
+              >
+                <Printer className="size-5 mr-2" />
+                Imprimir Recibo
               </Button>
             </CardContent>
           </Card>
@@ -1180,6 +1280,178 @@ function CajaTab() {
   // ─── Tables Overview ────────────────────────────────────────
   return (
     <div className="space-y-4">
+      {/* Cash Session Section */}
+      <Card className="rounded-xl border-2 border-amber-200 bg-amber-50/50">
+        <CardContent className="p-4">
+          {!cashSession ? (
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="font-bold text-lg flex items-center gap-2">
+                  <Lock className="size-5 text-red-600" />
+                  Caja Cerrada
+                </h3>
+                <p className="text-sm text-muted-foreground">Debes abrir caja para poder cobrar</p>
+              </div>
+              <Button
+                className="bg-green-600 hover:bg-green-700 text-white"
+                onClick={() => setShowOpenCashDialog(true)}
+              >
+                Abrir Caja
+              </Button>
+            </div>
+          ) : (
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="font-bold text-lg flex items-center gap-2">
+                  <CheckCircle className="size-5 text-green-600" />
+                  Caja Abierta
+                </h3>
+                <p className="text-sm text-muted-foreground">
+                  Apertura: {formatEUR(cashSession.openingCash)} ·
+                  Iniciada: {formatTime(cashSession.openedAt)}
+                  {cashSession.openedBy && ` · Por: ${cashSession.openedBy.name ?? cashSession.openedBy.username ?? ''}`}
+                </p>
+              </div>
+              <Button
+                variant="outline"
+                className="border-red-300 text-red-700 hover:bg-red-50"
+                onClick={() => setShowCloseCashDialog(true)}
+              >
+                Cerrar Caja
+              </Button>
+            </div>
+          )}
+          {cashCloseSummary && (
+            <div className="mt-3 p-3 bg-white rounded-lg border text-sm space-y-1">
+              <p className="font-bold text-base mb-1">Resumen de cierre</p>
+              <div className="flex justify-between"><span>Ventas totales:</span><span className="font-semibold">{formatEUR(cashCloseSummary.totalSales ?? 0)}</span></div>
+              <div className="flex justify-between"><span>Efectivo:</span><span className="font-semibold">{formatEUR(cashCloseSummary.totalCash ?? 0)}</span></div>
+              <div className="flex justify-between"><span>Tarjeta:</span><span className="font-semibold">{formatEUR(cashCloseSummary.totalCard ?? 0)}</span></div>
+              <Separator />
+              <div className="flex justify-between"><span>Esperado:</span><span className="font-semibold">{formatEUR(cashCloseSummary.expectedCash ?? 0)}</span></div>
+              <div className="flex justify-between"><span>Real:</span><span className="font-semibold">{formatEUR(cashCloseSummary.closingCash ?? 0)}</span></div>
+              <div className="flex justify-between"><span>Diferencia:</span>
+                <span className={`font-bold ${(cashCloseSummary.difference ?? 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                  {formatEUR(cashCloseSummary.difference ?? 0)}
+                </span>
+              </div>
+              <Button variant="ghost" size="sm" className="mt-1 text-xs" onClick={() => setCashCloseSummary(null)}>
+                Cerrar resumen
+              </Button>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Open Cash Dialog */}
+      <Dialog open={showOpenCashDialog} onOpenChange={setShowOpenCashDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Abrir Caja</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>Efectivo de apertura (€)</Label>
+              <Input
+                type="number"
+                step="0.01"
+                placeholder="0.00"
+                value={openingCashInput}
+                onChange={(e) => setOpeningCashInput(e.target.value)}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowOpenCashDialog(false)}>Cancelar</Button>
+            <Button
+              className="bg-green-600 hover:bg-green-700 text-white"
+              disabled={cashSessionLoading || !openingCashInput}
+              onClick={async () => {
+                setCashSessionLoading(true)
+                try {
+                  const res = await fetch('/api/cash-sessions', {
+                    method: 'POST',
+                    headers: authHeaders(),
+                    body: JSON.stringify({ openingCash: parseFloat(openingCashInput) }),
+                  })
+                  if (handleFetchResponse(res) && res.ok) {
+                    toast.success('Caja abierta correctamente')
+                    setShowOpenCashDialog(false)
+                    setOpeningCashInput('')
+                    fetchCashSession()
+                  } else {
+                    const err = await res.json()
+                    toast.error(err.error || 'Error al abrir caja')
+                  }
+                } catch {
+                  toast.error('Error de red')
+                } finally {
+                  setCashSessionLoading(false)
+                }
+              }}
+            >
+              Abrir Caja
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Close Cash Dialog */}
+      <Dialog open={showCloseCashDialog} onOpenChange={setShowCloseCashDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Cerrar Caja</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>Efectivo de cierre (€)</Label>
+              <Input
+                type="number"
+                step="0.01"
+                placeholder="0.00"
+                value={closingCashInput}
+                onChange={(e) => setClosingCashInput(e.target.value)}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowCloseCashDialog(false)}>Cancelar</Button>
+            <Button
+              variant="destructive"
+              disabled={cashSessionLoading || !closingCashInput}
+              onClick={async () => {
+                setCashSessionLoading(true)
+                try {
+                  const res = await fetch(`/api/cash-sessions/${cashSession.id}`, {
+                    method: 'PUT',
+                    headers: authHeaders(),
+                    body: JSON.stringify({ closingCash: parseFloat(closingCashInput) }),
+                  })
+                  if (handleFetchResponse(res) && res.ok) {
+                    const data = await res.json()
+                    setCashCloseSummary(data.cashSession ?? data)
+                    toast.success('Caja cerrada correctamente')
+                    setShowCloseCashDialog(false)
+                    setClosingCashInput('')
+                    setCashSession(null)
+                    fetchCashSession()
+                  } else {
+                    const err = await res.json()
+                    toast.error(err.error || 'Error al cerrar caja')
+                  }
+                } catch {
+                  toast.error('Error de red')
+                } finally {
+                  setCashSessionLoading(false)
+                }
+              }}
+            >
+              Cerrar Caja
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <div className="flex items-center justify-between">
         <h2 className="text-2xl font-bold tracking-tight">Caja</h2>
         <Button variant="outline" size="sm" className="h-10" onClick={() => { fetchTables(); fetchActiveOrders() }}>
@@ -1256,6 +1528,288 @@ function CajaTab() {
   )
 }
 
+// ─── REPORTES TAB ───────────────────────────────────────────────────────────
+
+function ReportesTab() {
+  const { authHeaders, handleFetchResponse } = useAuth()
+  const [reportType, setReportType] = useState<'daily_sales' | 'payment_methods' | 'top_products' | 'cancelled_orders' | 'cash_closes'>('daily_sales')
+  const [dateFrom, setDateFrom] = useState('')
+  const [dateTo, setDateTo] = useState('')
+  const [reportData, setReportData] = useState<any>(null)
+  const [loading, setLoading] = useState(false)
+
+  const fetchReport = useCallback(async () => {
+    setLoading(true)
+    try {
+      const params = new URLSearchParams({ type: reportType })
+      if (dateFrom) params.set('dateFrom', dateFrom)
+      if (dateTo) params.set('dateTo', dateTo)
+      const res = await fetch(`/api/reports?${params.toString()}`, { headers: authHeaders(false) })
+      if (handleFetchResponse(res) && res.ok) {
+        const json = await res.json()
+        setReportData(json)
+      }
+    } catch { /* silently fail */ } finally {
+      setLoading(false)
+    }
+  }, [reportType, dateFrom, dateTo, authHeaders, handleFetchResponse])
+
+  useEffect(() => {
+    fetchReport()
+  }, [fetchReport])
+
+  const reportTypes = [
+    { value: 'daily_sales' as const, label: 'Ventas del día' },
+    { value: 'payment_methods' as const, label: 'Por método de pago' },
+    { value: 'top_products' as const, label: 'Productos más vendidos' },
+    { value: 'cancelled_orders' as const, label: 'Pedidos cancelados' },
+    { value: 'cash_closes' as const, label: 'Cierres de caja' },
+  ]
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h2 className="text-2xl font-bold tracking-tight">Reportes</h2>
+        <Button variant="outline" size="sm" className="h-10" onClick={fetchReport} disabled={loading}>
+          <BarChart3 className="size-4 mr-1" />
+          {loading ? 'Cargando...' : 'Actualizar'}
+        </Button>
+      </div>
+
+      {/* Filters */}
+      <Card className="rounded-xl">
+        <CardContent className="p-4 space-y-4">
+          <div className="flex flex-wrap gap-2">
+            {reportTypes.map((rt) => (
+              <Button
+                key={rt.value}
+                variant={reportType === rt.value ? 'default' : 'outline'}
+                size="sm"
+                className={reportType === rt.value ? 'bg-amber-600 hover:bg-amber-700 text-white' : ''}
+                onClick={() => { setReportType(rt.value); setReportData(null) }}
+              >
+                {rt.label}
+              </Button>
+            ))}
+          </div>
+          <div className="flex gap-3 items-end">
+            <div className="space-y-1">
+              <Label className="text-xs">Desde</Label>
+              <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="h-9" />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Hasta</Label>
+              <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="h-9" />
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Report Content */}
+      {loading ? (
+        <div className="grid gap-4">
+          <Skeleton className="h-40 rounded-xl" />
+          <Skeleton className="h-20 rounded-xl" />
+        </div>
+      ) : !reportData ? (
+        <Card className="rounded-xl">
+          <CardContent className="p-6">
+            <p className="text-muted-foreground text-center">Selecciona un reporte y haz clic en Actualizar</p>
+          </CardContent>
+        </Card>
+      ) : (
+        <>
+          {/* Daily Sales */}
+          {reportType === 'daily_sales' && (
+            <Card className="rounded-xl">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <BarChart3 className="size-5" />
+                  Ventas del día
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-3 gap-4 mb-4">
+                  <div className="text-center p-3 bg-amber-50 rounded-lg">
+                    <p className="text-sm text-muted-foreground">Ingresos</p>
+                    <p className="text-2xl font-bold text-amber-700">{formatEUR(reportData.totalRevenue ?? 0)}</p>
+                  </div>
+                  <div className="text-center p-3 bg-amber-50 rounded-lg">
+                    <p className="text-sm text-muted-foreground">Pedidos</p>
+                    <p className="text-2xl font-bold text-amber-700">{reportData.totalOrders ?? 0}</p>
+                  </div>
+                  <div className="text-center p-3 bg-amber-50 rounded-lg">
+                    <p className="text-sm text-muted-foreground">Ticket medio</p>
+                    <p className="text-2xl font-bold text-amber-700">{formatEUR(reportData.avgTicket ?? 0)}</p>
+                  </div>
+                </div>
+                {reportData.days && reportData.days.length > 0 && (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b">
+                          <th className="text-left p-2">Fecha</th>
+                          <th className="text-right p-2">Ingresos</th>
+                          <th className="text-right p-2">Pedidos</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {reportData.days.map((d: any, i: number) => (
+                          <tr key={i} className="border-b">
+                            <td className="p-2">{d.date}</td>
+                            <td className="text-right p-2 font-semibold">{formatEUR(d.revenue)}</td>
+                            <td className="text-right p-2">{d.orders}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Payment Methods */}
+          {reportType === 'payment_methods' && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <Card className="rounded-xl">
+                <CardContent className="p-6 text-center">
+                  <Euro className="size-10 mx-auto mb-2 text-green-600" />
+                  <p className="text-sm text-muted-foreground">Efectivo</p>
+                  <p className="text-3xl font-bold text-green-700">{formatEUR(reportData.efectivo?.total ?? 0)}</p>
+                  <p className="text-sm text-muted-foreground mt-1">{reportData.efectivo?.count ?? 0} pagos</p>
+                </CardContent>
+              </Card>
+              <Card className="rounded-xl">
+                <CardContent className="p-6 text-center">
+                  <CreditCard className="size-10 mx-auto mb-2 text-blue-600" />
+                  <p className="text-sm text-muted-foreground">Tarjeta</p>
+                  <p className="text-3xl font-bold text-blue-700">{formatEUR(reportData.tarjeta?.total ?? 0)}</p>
+                  <p className="text-sm text-muted-foreground mt-1">{reportData.tarjeta?.count ?? 0} pagos</p>
+                </CardContent>
+              </Card>
+            </div>
+          )}
+
+          {/* Top Products */}
+          {reportType === 'top_products' && (
+            <Card className="rounded-xl">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Star className="size-5" />
+                  Productos más vendidos
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                {reportData.products && reportData.products.length > 0 ? (
+                  <div className="space-y-2">
+                    {reportData.products.map((p: any, i: number) => (
+                      <div key={i} className="flex items-center justify-between p-3 bg-amber-50 rounded-lg">
+                        <div className="flex items-center gap-3">
+                          <span className="flex size-8 items-center justify-center rounded-full bg-amber-600 text-white text-sm font-bold">
+                            {i + 1}
+                          </span>
+                          <div>
+                            <p className="font-semibold">{p.name}</p>
+                            <p className="text-xs text-muted-foreground">{p.quantity} unidades</p>
+                          </div>
+                        </div>
+                        <span className="font-bold text-amber-700">{formatEUR(p.revenue)}</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-muted-foreground text-center py-8">No hay datos</p>
+                )}
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Cancelled Orders */}
+          {reportType === 'cancelled_orders' && (
+            <Card className="rounded-xl">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <XCircle className="size-5 text-red-500" />
+                  Pedidos cancelados
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="mb-4 p-3 bg-red-50 rounded-lg text-center">
+                  <p className="text-sm text-muted-foreground">Ingresos perdidos</p>
+                  <p className="text-2xl font-bold text-red-700">{formatEUR(reportData.totalLost ?? reportData.lostRevenue ?? 0)}</p>
+                  <p className="text-sm text-muted-foreground">{reportData.totalCount ?? reportData.orders?.length ?? 0} pedidos</p>
+                </div>
+                {reportData.orders && reportData.orders.length > 0 ? (
+                  <ScrollArea className="max-h-96">
+                    <div className="space-y-2">
+                      {reportData.orders.map((o: any) => (
+                        <div key={o.id} className="border rounded-lg p-3">
+                          <div className="flex justify-between mb-1">
+                            <span className="font-semibold">Mesa {o.table?.number ?? '?'}</span>
+                            <span className="font-bold text-red-600">{formatEUR(o.total)}</span>
+                          </div>
+                          <p className="text-xs text-muted-foreground">{new Date(o.createdAt).toLocaleString('es-ES')}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </ScrollArea>
+                ) : (
+                  <p className="text-muted-foreground text-center py-8">No hay pedidos cancelados</p>
+                )}
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Cash Closes */}
+          {reportType === 'cash_closes' && (
+            <Card className="rounded-xl">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Receipt className="size-5" />
+                  Cierres de caja
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                {reportData.sessions && reportData.sessions.length > 0 ? (
+                  <ScrollArea className="max-h-96">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b">
+                          <th className="text-left p-2">Apertura</th>
+                          <th className="text-right p-2">Apertura €</th>
+                          <th className="text-right p-2">Cierre €</th>
+                          <th className="text-right p-2">Ventas</th>
+                          <th className="text-right p-2">Diferencia</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {reportData.sessions.map((s: any) => (
+                          <tr key={s.id} className="border-b">
+                            <td className="p-2">{s.openedAt ? new Date(s.openedAt).toLocaleString('es-ES') : '-'}</td>
+                            <td className="text-right p-2">{formatEUR(s.openingCash)}</td>
+                            <td className="text-right p-2">{s.closingCash != null ? formatEUR(s.closingCash) : '-'}</td>
+                            <td className="text-right p-2">{formatEUR(s.totalSales ?? 0)}</td>
+                            <td className={`text-right p-2 font-semibold ${(s.difference ?? 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                              {s.difference != null ? formatEUR(s.difference) : '-'}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </ScrollArea>
+                ) : (
+                  <p className="text-muted-foreground text-center py-8">No hay cierres de caja</p>
+                )}
+              </CardContent>
+            </Card>
+          )}
+        </>
+      )}
+    </div>
+  )
+}
+
 // ─── ADMIN STUB TABS ────────────────────────────────────────────────────────
 
 function AdminStub({ title, icon }: { title: string; icon: React.ReactNode }) {
@@ -1275,11 +1829,27 @@ export default function RestaurantPage() {
 
   // ─── Auth State ────────────────────────────────────────────────
   const [authToken, setAuthToken] = useState<string | null>(null)
-  const [currentUser, setCurrentUser] = useState<{ userId: string; username: string; role: string; name: string; restaurantId?: string } | null>(null)
+  const [currentUser, setCurrentUser] = useState<{ userId: string; username: string; role: string; name: string; restaurantId?: string; mustChangePassword?: boolean } | null>(null)
   const [loginUsername, setLoginUsername] = useState('')
   const [loginPassword, setLoginPassword] = useState('')
   const [loginError, setLoginError] = useState('')
   const [loginLoading, setLoginLoading] = useState(false)
+
+  // ─── Must Change Password State ──────────────────────────────
+  const [showChangePasswordDialog, setShowChangePasswordDialog] = useState(false)
+  const [changePasswordCurrent, setChangePasswordCurrent] = useState('')
+  const [changePasswordNew, setChangePasswordNew] = useState('')
+  const [changePasswordConfirm, setChangePasswordConfirm] = useState('')
+  const [changePasswordLoading, setChangePasswordLoading] = useState(false)
+  const [changePasswordError, setChangePasswordError] = useState('')
+
+  // ─── SaaS Subscription State ────────────────────────────────
+  const [subscriptionSuspended, setSubscriptionSuspended] = useState(false)
+
+  // ─── Onboarding State ──────────────────────────────────────
+  const [showOnboardingDialog, setShowOnboardingDialog] = useState(false)
+  const [onboardingLoading, setOnboardingLoading] = useState(false)
+  const [onboardingForm, setOnboardingForm] = useState({ name: '', slug: '', address: '', phone: '', adminUsername: '', adminPassword: '', adminName: '' })
 
   // Load auth from localStorage on mount
   useEffect(() => {
@@ -1312,7 +1882,7 @@ export default function RestaurantPage() {
                 .then((r) => r.json())
                 .then((data) => {
                   if (data.token) {
-                    const userData = { userId: data.user.id, username: data.user.username, name: data.user.name, role: data.user.role, restaurantId: data.user.restaurantId }
+                    const userData = { userId: data.user.id, username: data.user.username, name: data.user.name, role: data.user.role, restaurantId: data.user.restaurantId, mustChangePassword: data.mustChangePassword ?? data.user.mustChangePassword ?? false }
                     setAuthToken(data.token)
                     setCurrentUser(userData)
                     localStorage.setItem('restaurantos_auth', JSON.stringify({ token: data.token, refreshToken: data.refreshToken, user: userData }))
@@ -1371,12 +1941,16 @@ export default function RestaurantPage() {
       })
       const data = await res.json()
       if (res.ok) {
-        const userData = { userId: data.user.id, username: data.user.username, name: data.user.name, role: data.user.role, restaurantId: data.user.restaurantId }
+        const userData = { userId: data.user.id, username: data.user.username, name: data.user.name, role: data.user.role, restaurantId: data.user.restaurantId, mustChangePassword: data.mustChangePassword ?? data.user.mustChangePassword ?? false }
         setAuthToken(data.token)
         setCurrentUser(userData)
         localStorage.setItem('restaurantos_auth', JSON.stringify({ token: data.token, refreshToken: data.refreshToken, user: userData }))
         setLoginUsername('')
         setLoginPassword('')
+        // Check must change password
+        if (userData.mustChangePassword) {
+          setShowChangePasswordDialog(true)
+        }
       } else {
         setLoginError(data.error || 'Error al iniciar sesión')
       }
@@ -1419,6 +1993,21 @@ export default function RestaurantPage() {
     }
   }, [authToken, currentUser, setRealtimeConnected])
 
+  // Fetch restaurant info to check subscription status
+  useEffect(() => {
+    if (!authToken || !currentUser?.restaurantId) return
+    const fetchRestaurant = async () => {
+      try {
+        const res = await fetch(`/api/restaurants/${currentUser.restaurantId}`, { headers: authHeaders(false) })
+        if (res.ok) {
+          const data = await res.json()
+          setSubscriptionSuspended(data.subscriptionStatus === 'suspended' || data.restaurant?.subscriptionStatus === 'suspended')
+        }
+      } catch { /* silently fail */ }
+    }
+    fetchRestaurant()
+  }, [authToken, currentUser?.restaurantId, authHeaders])
+
   const mainTabs = [
     { id: 'camarero' as TabId, label: 'Camarero', icon: <Utensils className="size-4" /> },
     { id: 'cocina' as TabId, label: 'Cocina', icon: <ChefHat className="size-4" /> },
@@ -1432,6 +2021,9 @@ export default function RestaurantPage() {
     { id: 'orders' as TabId, label: 'Pedidos', icon: <Receipt className="size-4" /> },
     { id: 'clients' as TabId, label: 'Clientes', icon: <Users className="size-4" /> },
   ]
+
+  // Roles that can access the reportes tab
+  const canAccessReportes = currentUser && ['super_admin', 'admin', 'encargado'].includes(currentUser.role)
 
   // ─── Login Screen ──────────────────────────────────────────────
   if (!authToken) {
@@ -1492,6 +2084,159 @@ export default function RestaurantPage() {
   return (
     <AuthContext.Provider value={{ authToken, currentUser, authHeaders, handleFetchResponse, logout }}>
       <div className="min-h-screen flex flex-col bg-background">
+        {/* Suspended subscription banner */}
+        {subscriptionSuspended && currentUser?.role !== 'super_admin' && (
+          <div className="bg-red-600 text-white text-center py-2 px-4 text-sm font-medium flex items-center justify-center gap-2">
+            <AlertTriangle className="size-4" />
+            Restaurante suspendido. Contacte al administrador del sistema.
+          </div>
+        )}
+
+        {/* Must Change Password Dialog */}
+        <Dialog open={showChangePasswordDialog} onOpenChange={() => { /* unclosable */ }}>
+          <DialogContent onPointerDownOutside={(e) => e.preventDefault()} onEscapeKeyDown={(e) => e.preventDefault()} className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Lock className="size-5 text-amber-600" />
+                Cambio de contraseña requerido
+              </DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label>Contraseña actual</Label>
+                <Input type="password" value={changePasswordCurrent} onChange={(e) => setChangePasswordCurrent(e.target.value)} />
+              </div>
+              <div className="space-y-2">
+                <Label>Nueva contraseña</Label>
+                <Input type="password" value={changePasswordNew} onChange={(e) => setChangePasswordNew(e.target.value)} />
+              </div>
+              <div className="space-y-2">
+                <Label>Confirmar nueva contraseña</Label>
+                <Input type="password" value={changePasswordConfirm} onChange={(e) => setChangePasswordConfirm(e.target.value)} />
+              </div>
+              {changePasswordError && (
+                <p className="text-sm text-red-600 text-center">{changePasswordError}</p>
+              )}
+            </div>
+            <DialogFooter>
+              <Button
+                className="bg-amber-600 hover:bg-amber-700 text-white"
+                disabled={changePasswordLoading || !changePasswordCurrent || !changePasswordNew || !changePasswordConfirm}
+                onClick={async () => {
+                  setChangePasswordError('')
+                  if (changePasswordNew !== changePasswordConfirm) {
+                    setChangePasswordError('Las contraseñas no coinciden')
+                    return
+                  }
+                  if (changePasswordNew.length < 4) {
+                    setChangePasswordError('La contraseña debe tener al menos 4 caracteres')
+                    return
+                  }
+                  setChangePasswordLoading(true)
+                  try {
+                    const res = await fetch('/api/users/change-password', {
+                      method: 'POST',
+                      headers: authHeaders(),
+                      body: JSON.stringify({ currentPassword: changePasswordCurrent, newPassword: changePasswordNew }),
+                    })
+                    if (res.ok) {
+                      toast.success('Contraseña cambiada correctamente')
+                      const updatedUser = { ...currentUser!, mustChangePassword: false }
+                      setCurrentUser(updatedUser)
+                      localStorage.setItem('restaurantos_auth', JSON.stringify({ token: authToken, refreshToken: JSON.parse(localStorage.getItem('restaurantos_auth') || '{}').refreshToken, user: updatedUser }))
+                      setShowChangePasswordDialog(false)
+                      setChangePasswordCurrent('')
+                      setChangePasswordNew('')
+                      setChangePasswordConfirm('')
+                    } else {
+                      const err = await res.json()
+                      setChangePasswordError(err.error || 'Error al cambiar contraseña')
+                    }
+                  } catch {
+                    setChangePasswordError('Error de red')
+                  } finally {
+                    setChangePasswordLoading(false)
+                  }
+                }}
+              >
+                {changePasswordLoading ? 'Cambiando...' : 'Cambiar Contraseña'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Onboarding Dialog */}
+        <Dialog open={showOnboardingDialog} onOpenChange={setShowOnboardingDialog}>
+          <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>Onboarding — Nuevo Restaurante</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label>Nombre del restaurante</Label>
+                <Input value={onboardingForm.name} onChange={(e) => setOnboardingForm({ ...onboardingForm, name: e.target.value })} />
+              </div>
+              <div className="space-y-2">
+                <Label>Slug</Label>
+                <Input value={onboardingForm.slug} onChange={(e) => setOnboardingForm({ ...onboardingForm, slug: e.target.value })} placeholder="mi-restaurante" />
+              </div>
+              <div className="space-y-2">
+                <Label>Dirección</Label>
+                <Input value={onboardingForm.address} onChange={(e) => setOnboardingForm({ ...onboardingForm, address: e.target.value })} />
+              </div>
+              <div className="space-y-2">
+                <Label>Teléfono</Label>
+                <Input value={onboardingForm.phone} onChange={(e) => setOnboardingForm({ ...onboardingForm, phone: e.target.value })} />
+              </div>
+              <Separator />
+              <p className="font-semibold">Administrador</p>
+              <div className="space-y-2">
+                <Label>Nombre</Label>
+                <Input value={onboardingForm.adminName} onChange={(e) => setOnboardingForm({ ...onboardingForm, adminName: e.target.value })} />
+              </div>
+              <div className="space-y-2">
+                <Label>Usuario</Label>
+                <Input value={onboardingForm.adminUsername} onChange={(e) => setOnboardingForm({ ...onboardingForm, adminUsername: e.target.value })} />
+              </div>
+              <div className="space-y-2">
+                <Label>Contraseña</Label>
+                <Input type="password" value={onboardingForm.adminPassword} onChange={(e) => setOnboardingForm({ ...onboardingForm, adminPassword: e.target.value })} />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setShowOnboardingDialog(false)}>Cancelar</Button>
+              <Button
+                className="bg-amber-600 hover:bg-amber-700 text-white"
+                disabled={onboardingLoading || !onboardingForm.name || !onboardingForm.slug || !onboardingForm.adminUsername || !onboardingForm.adminPassword}
+                onClick={async () => {
+                  setOnboardingLoading(true)
+                  try {
+                    const res = await fetch('/api/onboarding', {
+                      method: 'POST',
+                      headers: authHeaders(),
+                      body: JSON.stringify(onboardingForm),
+                    })
+                    if (res.ok) {
+                      toast.success('Restaurante y admin creados correctamente')
+                      setShowOnboardingDialog(false)
+                      setOnboardingForm({ name: '', slug: '', address: '', phone: '', adminUsername: '', adminPassword: '', adminName: '' })
+                    } else {
+                      const err = await res.json()
+                      toast.error(err.error || 'Error al crear restaurante')
+                    }
+                  } catch {
+                    toast.error('Error de red')
+                  } finally {
+                    setOnboardingLoading(false)
+                  }
+                }}
+              >
+                {onboardingLoading ? 'Creando...' : 'Crear Restaurante'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
         {/* Top bar */}
         <header className="border-b bg-white sticky top-0 z-50">
           <div className="max-w-[1400px] mx-auto flex items-center justify-between px-4 py-2">
@@ -1519,6 +2264,12 @@ export default function RestaurantPage() {
                 <LogOut className="size-4 mr-1" />
                 <span className="hidden sm:inline">Salir</span>
               </Button>
+              {currentUser?.role === 'super_admin' && (
+                <Button variant="outline" size="sm" className="h-8" onClick={() => setShowOnboardingDialog(true)}>
+                  <Plus className="size-4 mr-1" />
+                  <span className="hidden sm:inline">Onboarding</span>
+                </Button>
+              )}
             </div>
           </div>
         </header>
@@ -1568,6 +2319,15 @@ export default function RestaurantPage() {
                     <span className="hidden sm:inline">{tab.label}</span>
                   </TabsTrigger>
                 ))}
+                {canAccessReportes && (
+                  <TabsTrigger
+                    value="reportes"
+                    className="h-8 data-[state=active]:bg-background gap-1 text-xs font-medium px-3"
+                  >
+                    <BarChart3 className="size-3.5" />
+                    <span className="hidden sm:inline">Reportes</span>
+                  </TabsTrigger>
+                )}
               </TabsList>
             </div>
 
@@ -1589,6 +2349,10 @@ export default function RestaurantPage() {
 
             <TabsContent value="clients" className="mt-2">
               <AdminStub title="Clientes" icon={<Users className="size-12" />} />
+            </TabsContent>
+
+            <TabsContent value="reportes" className="mt-2">
+              <ReportesTab />
             </TabsContent>
           </Tabs>
         </main>

@@ -7,7 +7,7 @@
 
 import { db } from '@/lib/db'
 import { NextResponse } from 'next/server'
-import { authenticateAndAuthorize, requireRestaurantScope } from '@/lib/auth'
+import { authenticateAndAuthorize, requireRestaurantScope, requireActiveSubscription } from '@/lib/auth'
 import { validateInput, updateOrderSchema } from '@/lib/validations'
 import { createAuditLog } from '@/lib/audit'
 import { handleApiError } from '@/lib/errors'
@@ -76,6 +76,10 @@ export async function PUT(
   const scope = requireRestaurantScope(user, request)
   if ('error' in scope) return scope.error
   const { restaurantId } = scope
+
+  // SaaS Subscription Guard: block order modification if restaurant is suspended
+  const subCheck = await requireActiveSubscription(restaurantId, user.role)
+  if ('error' in subCheck) return subCheck.error
 
   try {
     const { id } = await params

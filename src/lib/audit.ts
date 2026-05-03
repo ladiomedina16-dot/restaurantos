@@ -23,9 +23,14 @@ export type AuditAction =
   | 'client_deleted'
   | 'user_created'
   | 'user_updated'
+  | 'user_deactivated'
   | 'login_success'
   | 'login_failed'
   | 'print_ticket'
+  | 'password_changed'
+  | 'password_reset'
+  | 'onboarding_completed'
+  | 'subscription_changed'
 
 export type EntityType =
   | 'order'
@@ -36,6 +41,7 @@ export type EntityType =
   | 'client'
   | 'user'
   | 'auth'
+  | 'restaurant'
 
 interface AuditParams {
   restaurantId: string

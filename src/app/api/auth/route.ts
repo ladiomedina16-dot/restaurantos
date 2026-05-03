@@ -52,7 +52,7 @@ export async function POST(request: Request) {
       // Verify user still exists and is active
       const user = await db.user.findUnique({
         where: { id: payload.userId },
-        select: { id: true, username: true, name: true, role: true, active: true, restaurantId: true },
+        select: { id: true, username: true, name: true, role: true, active: true, restaurantId: true, mustChangePassword: true },
       })
 
       if (!user || !user.active) {
@@ -81,6 +81,7 @@ export async function POST(request: Request) {
           name: user.name,
           role: user.role,
           restaurantId: user.restaurantId,
+          mustChangePassword: user.mustChangePassword,
         },
       })
     }
@@ -157,12 +158,14 @@ export async function POST(request: Request) {
     return NextResponse.json({
       token,
       refreshToken,
+      mustChangePassword: user.mustChangePassword,
       user: {
         id: user.id,
         username: user.username,
         name: user.name,
         role: user.role,
         restaurantId: user.restaurantId,
+        mustChangePassword: user.mustChangePassword,
       },
     })
   } catch (error) {
@@ -201,6 +204,7 @@ export async function GET(request: Request) {
         role: true,
         active: true,
         restaurantId: true,
+        mustChangePassword: true,
         createdAt: true,
       },
     })

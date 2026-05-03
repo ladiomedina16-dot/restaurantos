@@ -192,3 +192,89 @@ Stage Summary:
 - Full flow working: login → get tables/products → create orders
 - Multi-restaurant data isolation verified
 - All API routes use Zod validation, audit logging, error handling
+
+---
+Task ID: 3
+Agent: backend-reports-agent
+Task: Reports API and cash session guard
+
+Work Log:
+- Added reportsQuerySchema to /src/lib/validations.ts (type enum with 5 report types, optional dateFrom/dateTo)
+- Created /src/app/api/reports/route.ts with GET handler requiring dashboard:read permission
+- Implemented daily_sales report: groups orders by day, returns totalRevenue, totalOrders, avgTicket, and days array
+- Implemented payment_methods report: groups payments by efectivo/tarjeta with count and total per method
+- Implemented top_products report: uses orderItem.groupBy by productId, enriched with product names, sorted by quantity desc
+- Implemented cancelled_orders report: lists cancelled orders with items, totals, and lost revenue
+- Implemented cash_closes report: lists closed cash sessions with opening/closing amounts, differences, and user info
+- All report queries scoped to restaurantId via requireRestaurantScope, defaulting date range to today
+- Added cash session guard to /src/app/api/orders/[id]/pay/route.ts: checks for open CashSession before processing payment, returns 400 with Spanish error message if none found
+- Linked payment creation to the open cash session via cashSessionId field
+- Fixed typo in cancelled_orders report (updatededAt → updatedAt)
+- Lint passes with no errors
+
+Stage Summary:
+- 5 report types available: daily_sales, payment_methods, top_products, cancelled_orders, cash_closes
+- Cash session guard prevents payments without an open session (400 error)
+- Payments now linked to cash sessions via cashSessionId
+
+---
+Task ID: 2
+Agent: backend-auth-security-agent
+Task: Auth flow, onboarding, password reset, SaaS subscription guard
+
+Work Log:
+- Updated /src/lib/validations.ts: added changePasswordSchema, resetPasswordSchema, onboardingSchema, updateRestaurantFullSchema, updateUserStatusSchema
+- Updated /src/lib/audit.ts: added audit action types (password_changed, password_reset, onboarding_completed, user_deactivated, subscription_changed) and 'restaurant' entity type
+- Updated /src/lib/auth.ts: added requireActiveSubscription() function that checks restaurant subscriptionStatus, super_admin bypasses, returns 403 if suspended
+- Updated /src/app/api/auth/route.ts: added mustChangePassword to login response (both at top level and in user object) and refresh response, added mustChangePassword to GET /me select and response
+- Created /src/app/api/users/change-password/route.ts: POST handler requiring auth, verifies currentPassword, updates passwordHash, sets mustChangePassword to false, audit logs password_changed
+- Created /src/app/api/users/[id]/reset-password/route.ts: POST handler requiring admin/super_admin/encargado, sets new password and mustChangePassword: true, audit logs password_reset, includes restaurant scope checks
+- Created /src/app/api/onboarding/route.ts: POST handler requiring super_admin, creates restaurant + admin user in single $transaction, sets mustChangePassword: true, audit logs onboarding_completed
+- Added subscription guard to /src/app/api/orders/route.ts POST (creating orders)
+- Added subscription guard to /src/app/api/orders/[id]/route.ts PUT (modifying orders)
+- Added subscription guard to /src/app/api/orders/[id]/pay/route.ts POST (processing payments)
+- Updated /src/app/api/restaurants/route.ts: added PUT handler for updating restaurant including subscriptionStatus (super_admin only), audit logs subscription_changed
+- Created /src/app/api/restaurants/[id]/route.ts: GET single restaurant, PUT update restaurant (super_admin can change subscriptionStatus, admin can change name/address/phone)
+- Updated /src/app/api/users/route.ts: POST sets mustChangePassword: true by default (unless explicitly false), added mustChangePassword to GET select, added PUT handler for toggling active status with user_deactivated audit log
+- Lint passes with no errors
+
+Stage Summary:
+- mustChangePassword flow: returned on login and /me, frontend can force password change dialog
+- Password change API: users can change their own password with current password verification
+- Password reset API: admin/super_admin/encargado can reset passwords, forces mustChangePassword
+- Onboarding API: super_admin creates restaurant + admin in transaction, admin forced to change password
+- SaaS subscription guard: suspended restaurants blocked from creating/modifying orders and processing payments
+- Restaurant [id] endpoint: GET/PUT with proper role-based access for subscriptionStatus changes
+- Users API: mustChangePassword defaults to true, active status toggle with deactivation audit
+
+---
+Task ID: 5
+Agent: frontend-production-agent
+Task: Frontend production features
+
+Work Log:
+- Added 'reportes' to TabId type in /src/lib/store.ts
+- Added new icon imports: Printer, BarChart3, Lock, AlertTriangle to page.tsx
+- Added mustChangePassword field to AuthContextType.currentUser type and all useState declarations
+- Updated login handler to extract mustChangePassword from auth response and trigger dialog
+- Updated refresh token handler to include mustChangePassword in userData
+- Added handlePrintTicket helper function for kitchen/bar/receipt printing via window.open + print()
+- Added kitchen print button (Printer icon) and bar print button (Wine icon) in CocinaTab next to TERMINAR
+- Added print receipt button in CajaTab payment panel after COBRAR button
+- Added cash session management to CajaTab: fetchCashSession, open/close dialogs, session info card
+- Added cash session guard: COBRAR button disabled when no open session, shows "Abre caja para poder cobrar"
+- Added cash close summary display with totalSales, expected vs actual, difference
+- Created ReportesTab component with 5 report types: daily_sales, payment_methods, top_products, cancelled_orders, cash_closes
+- Added date range pickers (dateFrom, dateTo) to ReportesTab
+- Added SaaS subscription suspended banner (red, AlertTriangle icon) for non-super_admin users
+- Added subscription status check via GET /api/restaurants/[id] on login
+- Added mustChangePassword dialog (unclosable) with current/new/confirm password fields, calls POST /api/users/change-password
+- Added Onboarding button in header for super_admin, opens dialog with restaurant + admin fields, calls POST /api/onboarding
+- Added 'reportes' tab trigger in admin TabsList with BarChart3 icon, visible only to super_admin/admin/encargado
+- Added TabsContent for reportes rendering ReportesTab component
+- Lint passes with no errors
+
+Stage Summary:
+- All 7 features implemented: mustChangePassword dialog, SaaS banner, print buttons, cash session, reports tab, onboarding
+- page.tsx grew from 1598 to 2362 lines
+- No existing design/colors/layout/UX changed for existing tabs (camarero, cocina, caja, dashboard)

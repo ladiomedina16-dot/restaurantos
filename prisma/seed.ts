@@ -13,13 +13,13 @@ async function seed() {
   const restaurants = await Promise.all([
     db.restaurant.upsert({
       where: { slug: 'la-carta-de-sevilla' },
-      update: { name: 'La Carta de Sevilla', address: 'Calle Betis 42, Sevilla', phone: '954123456' },
-      create: { name: 'La Carta de Sevilla', slug: 'la-carta-de-sevilla', address: 'Calle Betis 42, Sevilla', phone: '954123456' },
+      update: { name: 'La Carta de Sevilla', address: 'Calle Betis 42, Sevilla', phone: '954123456', subscriptionStatus: 'active' },
+      create: { name: 'La Carta de Sevilla', slug: 'la-carta-de-sevilla', address: 'Calle Betis 42, Sevilla', phone: '954123456', subscriptionStatus: 'active' },
     }),
     db.restaurant.upsert({
       where: { slug: 'taberna-del-puerto' },
-      update: { name: 'Taberna del Puerto', address: 'Muelle de las Delicias 8, Sevilla', phone: '954789012' },
-      create: { name: 'Taberna del Puerto', slug: 'taberna-del-puerto', address: 'Muelle de las Delicias 8, Sevilla', phone: '954789012' },
+      update: { name: 'Taberna del Puerto', address: 'Muelle de las Delicias 8, Sevilla', phone: '954789012', subscriptionStatus: 'active' },
+      create: { name: 'Taberna del Puerto', slug: 'taberna-del-puerto', address: 'Muelle de las Delicias 8, Sevilla', phone: '954789012', subscriptionStatus: 'active' },
     }),
   ])
   console.log(`✅ ${restaurants.length} restaurantes creados`)

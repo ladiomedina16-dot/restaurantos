@@ -143,11 +143,60 @@ export const closeCashSessionSchema = z.object({
   closingCash: z.number().min(0, 'El dinero de cierre no puede ser negativo').max(99999),
 })
 
+// ─── Reports ───────────────────────────────────────────────
+
+export const reportsQuerySchema = z.object({
+  type: z.enum(['daily_sales', 'payment_methods', 'top_products', 'cancelled_orders', 'cash_closes']),
+  dateFrom: z.string().optional(),
+  dateTo: z.string().optional(),
+})
+
 // ─── Print ─────────────────────────────────────────────────
 
 export const printTicketSchema = z.object({
   type: z.enum(['kitchen', 'bar', 'receipt']),
   orderId: z.string().min(1),
+})
+
+// ─── Change Password ───────────────────────────────────────
+
+export const changePasswordSchema = z.object({
+  currentPassword: z.string().min(1, 'Contraseña actual obligatoria'),
+  newPassword: z.string().min(6, 'Mínimo 6 caracteres').max(100),
+})
+
+// ─── Reset Password (admin) ────────────────────────────────
+
+export const resetPasswordSchema = z.object({
+  newPassword: z.string().min(6, 'Mínimo 6 caracteres').max(100),
+})
+
+// ─── Onboarding ────────────────────────────────────────────
+
+export const onboardingSchema = z.object({
+  restaurantName: z.string().min(1, 'Nombre obligatorio').max(100),
+  slug: z.string().min(1).max(50).regex(/^[a-z0-9-]+$/, 'Solo minúsculas, números y guiones'),
+  address: z.string().max(200).optional().default(''),
+  phone: z.string().max(20).optional().default(''),
+  adminUsername: z.string().min(3, 'Mínimo 3 caracteres').max(30),
+  adminPassword: z.string().min(6, 'Mínimo 6 caracteres').max(100),
+  adminName: z.string().max(100).optional().default(''),
+})
+
+// ─── Update Restaurant (with subscriptionStatus) ───────────
+
+export const updateRestaurantFullSchema = z.object({
+  name: z.string().min(1).max(100).optional(),
+  address: z.string().max(200).optional(),
+  phone: z.string().max(20).optional(),
+  active: z.boolean().optional(),
+  subscriptionStatus: z.enum(['trial', 'active', 'suspended']).optional(),
+})
+
+// ─── Update User Active Status ─────────────────────────────
+
+export const updateUserStatusSchema = z.object({
+  active: z.boolean(),
 })
 
 // ─── Validation helper ─────────────────────────────────────
