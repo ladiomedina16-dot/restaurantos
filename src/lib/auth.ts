@@ -5,8 +5,10 @@
 import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
 
-const JWT_SECRET = process.env.JWT_SECRET || 'restaurantos-secret-key-change-in-production'
+const JWT_SECRET = process.env.JWT_SECRET || 'rst-os-dev-jwt-fallback'
+const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || 'rst-os-dev-refresh-fallback'
 const JWT_EXPIRES_IN = '8h'
+const JWT_REFRESH_EXPIRES_IN = '7d'
 
 // ─── Types ──────────────────────────────────────────────────
 
@@ -34,9 +36,21 @@ export function signToken(payload: JwtPayload): string {
   return jwt.sign(payload, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN })
 }
 
+export function signRefreshToken(payload: JwtPayload): string {
+  return jwt.sign(payload, JWT_REFRESH_SECRET, { expiresIn: JWT_REFRESH_EXPIRES_IN })
+}
+
 export function verifyToken(token: string): JwtPayload | null {
   try {
     return jwt.verify(token, JWT_SECRET) as JwtPayload
+  } catch {
+    return null
+  }
+}
+
+export function verifyRefreshToken(token: string): JwtPayload | null {
+  try {
+    return jwt.verify(token, JWT_REFRESH_SECRET) as JwtPayload
   } catch {
     return null
   }

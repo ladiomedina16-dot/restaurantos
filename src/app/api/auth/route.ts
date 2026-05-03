@@ -1,42 +1,78 @@
 // ============================================================
 // /api/auth — JWT Authentication endpoints
-// POST /api/auth/login  → { username, password } → JWT token + user info
-// GET  /api/auth/me     → Authorization: Bearer xxx → current user
+// POST /api/auth          → { username, password } → JWT token + refresh + user info
+// POST /api/auth/refresh  → { refreshToken } → new JWT token
+// GET  /api/auth/me       → Authorization: Bearer xxx → current user
 // ============================================================
 
 import { db } from '@/lib/db'
 import { NextResponse } from 'next/server'
-import { hashPassword, verifyPassword, signToken, verifyToken, type JwtPayload } from '@/lib/auth'
+import {
+  hashPassword,
+  verifyPassword,
+  signToken,
+  signRefreshToken,
+  verifyToken,
+  verifyRefreshToken,
+  type JwtPayload,
+} from '@/lib/auth'
 
-// ─── Ensure default super_admin exists on first request ─────
-
-async function ensureSuperAdmin() {
-  const existing = await db.user.findFirst({ where: { role: 'super_admin' } })
-  if (!existing) {
-    const hashed = await hashPassword('admin123')
-    await db.user.create({
-      data: {
-        username: 'admin',
-        passwordHash: hashed,
-        name: 'Super Admin',
-        role: 'super_admin',
-      },
-    })
-  }
-}
-
-// ─── POST /api/auth/login ───────────────────────────────────
+// ─── POST /api/auth (login) ────────────────────────────────
 
 export async function POST(request: Request) {
   try {
-    await ensureSuperAdmin()
-
     const body = await request.json()
-    const { username, password } = body as {
-      username: string
-      password: string
+    const { username, password, refreshToken: refreshRequestToken } = body as {
+      username?: string
+      password?: string
+      refreshToken?: string
     }
 
+    // ─── Refresh token flow ──────────────────────────────────
+    if (refreshRequestToken) {
+      const payload = verifyRefreshToken(refreshRequestToken)
+      if (!payload) {
+        return NextResponse.json(
+          { error: 'Refresh token inválido o expirado.' },
+          { status: 401 }
+        )
+      }
+
+      // Verify user still exists and is active
+      const user = await db.user.findUnique({
+        where: { id: payload.userId },
+        select: { id: true, username: true, name: true, role: true, active: true },
+      })
+
+      if (!user || !user.active) {
+        return NextResponse.json(
+          { error: 'Usuario no encontrado o desactivado.' },
+          { status: 401 }
+        )
+      }
+
+      const newPayload: JwtPayload = {
+        userId: user.id,
+        username: user.username,
+        role: user.role as JwtPayload['role'],
+      }
+
+      const token = signToken(newPayload)
+      const newRefreshToken = signRefreshToken(newPayload)
+
+      return NextResponse.json({
+        token,
+        refreshToken: newRefreshToken,
+        user: {
+          id: user.id,
+          username: user.username,
+          name: user.name,
+          role: user.role,
+        },
+      })
+    }
+
+    // ─── Login flow ──────────────────────────────────────────
     if (!username || !password) {
       return NextResponse.json(
         { error: 'Username and password are required' },
@@ -75,9 +111,11 @@ export async function POST(request: Request) {
     }
 
     const token = signToken(payload)
+    const refreshToken = signRefreshToken(payload)
 
     return NextResponse.json({
       token,
+      refreshToken,
       user: {
         id: user.id,
         username: user.username,

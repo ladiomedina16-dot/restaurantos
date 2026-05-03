@@ -1287,8 +1287,49 @@ export default function RestaurantPage() {
     if (saved) {
       try {
         const parsed = JSON.parse(saved)
-        setAuthToken(parsed.token)
-        setCurrentUser(parsed.user)
+        // Check if token is expired before using it
+        if (parsed.token) {
+          try {
+            const base64Url = parsed.token.split('.')[1]
+            const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/')
+            const jsonPayload = decodeURIComponent(
+              atob(base64)
+                .split('')
+                .map((c: string) => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
+                .join('')
+            )
+            const { exp } = JSON.parse(jsonPayload)
+            if (exp && exp * 1000 > Date.now()) {
+              setAuthToken(parsed.token)
+              setCurrentUser(parsed.user)
+            } else if (parsed.refreshToken) {
+              // Try to refresh the token
+              fetch('/api/auth', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ refreshToken: parsed.refreshToken }),
+              })
+                .then((r) => r.json())
+                .then((data) => {
+                  if (data.token) {
+                    const userData = { userId: data.user.id, username: data.user.username, name: data.user.name, role: data.user.role }
+                    setAuthToken(data.token)
+                    setCurrentUser(userData)
+                    localStorage.setItem('restaurantos_auth', JSON.stringify({ token: data.token, refreshToken: data.refreshToken, user: userData }))
+                  } else {
+                    localStorage.removeItem('restaurantos_auth')
+                  }
+                })
+                .catch(() => localStorage.removeItem('restaurantos_auth'))
+            } else {
+              localStorage.removeItem('restaurantos_auth')
+            }
+          } catch {
+            // If token parsing fails, still try to use it
+            setAuthToken(parsed.token)
+            setCurrentUser(parsed.user)
+          }
+        }
       } catch { /* ignore */ }
     }
   }, [])
@@ -1332,7 +1373,7 @@ export default function RestaurantPage() {
         const userData = { userId: data.user.id, username: data.user.username, name: data.user.name, role: data.user.role }
         setAuthToken(data.token)
         setCurrentUser(userData)
-        localStorage.setItem('restaurantos_auth', JSON.stringify({ token: data.token, user: userData }))
+        localStorage.setItem('restaurantos_auth', JSON.stringify({ token: data.token, refreshToken: data.refreshToken, user: userData }))
         setLoginUsername('')
         setLoginPassword('')
       } else {

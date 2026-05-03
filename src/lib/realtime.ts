@@ -5,8 +5,8 @@
 // to connected clients. Frontend NEVER emits broadcast events.
 // ============================================================
 
-const SOCKET_SERVER_URL = 'http://localhost:3003'
-const API_SECRET = process.env.API_SECRET || 'restaurantos-api-secret'
+const SOCKET_SERVER_URL = process.env.SOCKET_SERVER_URL || 'http://localhost:3003'
+const API_SECRET = process.env.API_SECRET || 'rst-os-api-s3cr3t-2024'
 
 interface EmitOptions {
   event: string

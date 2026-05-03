@@ -1,6 +1,6 @@
 // ============================================================
-// RESTAURANT APP - Production Schema v2
-// Secure, role-based, with audit trail
+// RESTAURANT APP - Production Schema v3
+// PostgreSQL (Supabase) - Secure, role-based, with audit trail
 // ============================================================
 
 generator client {
@@ -8,11 +8,12 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
-// ─── USUARIOS (replaces Admin) ──────────────────────────────
+// ─── USUARIOS ──────────────────────────────────────────────
 // Roles: super_admin, admin, encargado, camarero, cocina, caja
 model User {
   id           String   @id @default(cuid())
@@ -35,7 +36,7 @@ model Product {
   id          String   @id @default(cuid())
   name        String
   description String   @default("")
-  price       Float    // precio en euros (source of truth, backend-only calculation)
+  price       Float   // precio en euros (source of truth, backend-only calculation)
   category    String   @default("general") // bebida, tapa_fria, tapa_caliente, montadito, racion, postre, comida, general
   stock       Int      @default(0)
   imageUrl    String   @default("")
@@ -80,9 +81,9 @@ model Order {
   tableId      String
   clientId     String?  // puede ser invitado sin registro
   status       String   @default("pending") // pending, in_progress, ready, served, paid, cancelled
-  subtotal     Float    @default(0)  // total antes de descuento (calculated backend-only)
-  discount     Float    @default(0)  // descuento aplicado (5ª gratis, etc.)
-  total        Float    @default(0)  // subtotal - discount
+  subtotal     Float   @default(0)  // total antes de descuento (calculated backend-only)
+  discount     Float   @default(0)  // descuento aplicado (5ª gratis, etc.)
+  total        Float   @default(0)  // subtotal - discount
   notes        String   @default("")
   createdById  String?  // who created the order
   finishedById String?  // who marked it ready
@@ -99,14 +100,14 @@ model Order {
 
 // ─── ITEMS DE PEDIDO ────────────────────────────────────────
 model OrderItem {
-  id         String  @id @default(cuid())
+  id         String   @id @default(cuid())
   orderId    String
   productId  String
-  quantity   Int     @default(1)
+  quantity   Int      @default(1)
   unitPrice  Float   // precio al momento del pedido (snapshot, backend-only)
   subtotal   Float   // quantity * unitPrice (backend-only calculation)
-  notes      String  @default("")       // existing field for general notes
-  modifiers  String  @default("")       // JSON: ["sin hielo", "poco hecho", "extra picante"]
+  notes      String   @default("")       // existing field for general notes
+  modifiers  String   @default("")       // JSON: ["sin hielo", "poco hecho", "extra picante"]
   createdAt  DateTime @default(now())
 
   order     Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
@@ -118,9 +119,9 @@ model Payment {
   id         String   @id @default(cuid())
   orderId    String
   userId     String   // who processed the payment
-  amount     Float    // amount paid
+  amount     Float   // amount paid
   method     String   // efectivo, tarjeta
-  discount   Float    @default(0)  // discount applied
+  discount   Float   @default(0)  // discount applied
   freeDrinks Int      @default(0)  // number of free drinks (5ª gratis)
   pointsUsed Int      @default(0)  // points redeemed (future)
   pointsEarned Int    @default(0)  // loyalty points earned

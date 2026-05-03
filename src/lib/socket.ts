@@ -5,7 +5,7 @@ let socket: Socket | null = null
 export const getSocket = (): Socket => {
   if (!socket) {
     socket = io({
-      path: '/',
+      path: '/socket.io',
       transports: ['websocket', 'polling'],
       query: { XTransformPort: '3003' },
     })
