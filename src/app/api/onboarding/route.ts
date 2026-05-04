@@ -1,7 +1,8 @@
 // ============================================================
 // /api/onboarding — Restaurant onboarding (super_admin only)
 // POST: { restaurantName, slug, address, phone, adminUsername, adminPassword, adminName }
-// Creates restaurant + admin user in a single transaction
+// Creates restaurant + admin user in a short transaction
+// Then copies BASE_PRODUCTS using createMany (outside transaction)
 // Sets mustChangePassword: true on the created admin
 // Audit log: onboarding_completed
 // ============================================================
@@ -57,7 +58,7 @@ export async function POST(request: Request) {
     // Hash the admin password
     const passwordHash = await hashPassword(adminPassword)
 
-    // Create restaurant + admin user in a single transaction
+    // Step 1: Create restaurant + admin user in a SHORT transaction with timeout
     const result = await db.$transaction(async (tx) => {
       // Create the restaurant
       const restaurant = await tx.restaurant.create({
@@ -93,22 +94,26 @@ export async function POST(request: Request) {
         },
       })
 
-      // Copy BASE_PRODUCTS to the new restaurant
-      for (const p of BASE_PRODUCTS) {
-        await tx.product.create({
-          data: {
-            name: p.name,
-            description: p.description,
-            price: p.price,
-            category: p.category,
-            stock: p.stock,
-            restaurantId: restaurant.id,
-          },
-        })
-      }
-
       return { restaurant, user: adminUser }
-    })
+    }, { timeout: 15000, maxWait: 10000 })
+
+    // Step 2: Copy BASE_PRODUCTS using createMany (OUTSIDE the transaction for speed)
+    try {
+      await db.product.createMany({
+        data: BASE_PRODUCTS.map(p => ({
+          name: p.name,
+          description: p.description,
+          price: p.price,
+          category: p.category,
+          stock: p.stock,
+          restaurantId: result.restaurant.id,
+        })),
+      })
+    } catch (productError) {
+      // If products fail to copy, log but don't fail the entire onboarding
+      // The restaurant and admin were already created successfully
+      console.error('[ONBOARDING] Error copying BASE_PRODUCTS:', productError)
+    }
 
     // Audit log
     await createAuditLog({
@@ -130,7 +135,14 @@ export async function POST(request: Request) {
       restaurant: result.restaurant,
       user: result.user,
     }, { status: 201 })
-  } catch (error) {
+  } catch (error: any) {
+    // Handle P2028 specifically (transaction timeout)
+    if (error?.code === 'P2028') {
+      return NextResponse.json(
+        { error: 'Tiempo de transacción agotado al crear restaurante. Intente de nuevo.' },
+        { status: 504 }
+      )
+    }
     return handleApiError('Onboarding', error)
   }
 }

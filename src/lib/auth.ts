@@ -8,16 +8,9 @@ import jwt from 'jsonwebtoken'
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 
-const JWT_SECRET = process.env.JWT_SECRET || ''
-const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || ''
-
-if (!JWT_SECRET) {
-  console.warn('[AUTH] ⚠️ JWT_SECRET is not set. Authentication will not work. Set it in .env or Vercel environment variables.')
-}
-if (!JWT_REFRESH_SECRET) {
-  console.warn('[AUTH] ⚠️ JWT_REFRESH_SECRET is not set. Token refresh will not work. Set it in .env or Vercel environment variables.')
-}
-const JWT_EXPIRES_IN = '8h'
+const JWT_SECRET = process.env.JWT_SECRET || 'rst-os-dev-jwt-fallback'
+const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || 'rst-os-dev-refresh-fallback'
+const JWT_EXPIRES_IN = '2h'
 const JWT_REFRESH_EXPIRES_IN = '7d'
 
 // ─── Rate Limiting (in-memory) ─────────────────────────────

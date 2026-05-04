@@ -71,6 +71,8 @@ export function handleApiError(context: string, error: unknown): NextResponse {
         return apiNotFound('Registro no encontrado')
       case 'P2003':
         return apiBadRequest('Referencia a registro inexistente')
+      case 'P2028':
+        return apiError('Tiempo de transacción agotado. Intente de nuevo.', 504)
       default:
         return apiError(`Error de base de datos (${error.code})`, 500)
     }
