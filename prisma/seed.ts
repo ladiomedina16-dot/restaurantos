@@ -5,16 +5,8 @@
 // If required env vars are missing, the seed ABORTS with a clear error.
 // ============================================================
 
-import 'dotenv/config'
-
-import { db } from '../src/lib/db'
-import bcrypt from 'bcryptjs'
-
-const hash = (pw: string) => bcrypt.hashSync(pw, 12)
-
-// ─── Read passwords from environment ────────────────────────
-// These MUST be set before running the seed.
-// If any is missing, the seed aborts immediately.
+// ─── Validate seed env vars FIRST, before any imports that touch the DB ────
+// This ensures we abort with a clear error before Prisma tries to connect.
 
 const SEED_SUPERADMIN_PASSWORD = process.env.SEED_SUPERADMIN_PASSWORD
 const SEED_ADMIN_PASSWORD      = process.env.SEED_ADMIN_PASSWORD
@@ -54,9 +46,16 @@ function validateSeedEnv() {
   check('SEED_STAFF_PASSWORD', SEED_STAFF_PASSWORD!)
 }
 
+// Validate BEFORE importing DB (Prisma will try to connect on import if dotenv is loaded)
+validateSeedEnv()
+
+import 'dotenv/config'
+import { db } from '../src/lib/db'
+import bcrypt from 'bcryptjs'
+
+const hash = (pw: string) => bcrypt.hashSync(pw, 12)
+
 async function seed() {
-  // Validate env vars BEFORE touching the database
-  validateSeedEnv()
 
   console.log('🌱 Seeding RestaurantOS with real Sevillian data...\n')
 

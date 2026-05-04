@@ -55,19 +55,25 @@ cp .env.example .env
 
 ---
 
-## 3. Run Migrations
+## 3. Run Migrations (MANUAL — before each deploy)
+
+> ⚠️ **Migrations are NOT executed automatically during Vercel builds.**
+> You must run them manually before deploying. This is intentional — it prevents
+> unreviewed schema changes from reaching production automatically.
 
 **Development** (creates a new migration):
 ```bash
 npx prisma migrate dev --name your_migration_name
 ```
 
-**Production / Vercel** (applies existing migrations):
+**Production** (run manually before deploying to Vercel):
 ```bash
+# Make sure your .env points to the production database, then:
 npx prisma migrate deploy
 ```
 
 > ⚠️ NEVER use `prisma db push` in production. Always use real migrations.
+> ⚠️ After running migrations, deploy to Vercel normally. The build script only runs `prisma generate && next build`.
 
 ---
 
@@ -130,13 +136,14 @@ API_SECRET              = [generated-value]
 
 Vercel will automatically run the `build` script from `package.json`:
 ```
-"build": "prisma migrate deploy && prisma generate && next build"
+"build": "prisma generate && next build"
 ```
 
 This ensures:
-1. `prisma migrate deploy` — applies pending migrations
-2. `prisma generate` — generates the Prisma Client
-3. `next build` — builds the Next.js app
+1. `prisma generate` — generates the Prisma Client
+2. `next build` — builds the Next.js app
+
+> ⚠️ **Migrations are NOT run automatically during build.** You must run them manually BEFORE deploying (see Section 3). This prevents unreviewed schema changes from being applied in production automatically.
 
 ### 6.3 Deploy
 
