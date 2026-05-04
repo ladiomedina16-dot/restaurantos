@@ -28,7 +28,9 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# env files — NEVER commit secrets
+# ═══════════════════════════════════════════════════════════
+# ENV FILES — NEVER commit secrets to Git
+# ═══════════════════════════════════════════════════════════
 .env
 .env.*
 !.env.example
@@ -59,6 +61,9 @@ prompt
 # AI agent context
 /agent-ctx/
 
+# Worklogs (may contain deployment details)
+worklog*.md
+
 # Legacy SQLite database
 /db/
 
@@ -79,3 +84,6 @@ Caddyfile
 
 # Start script (dev-only)
 start.sh
+
+# Prisma engine binaries (platform-specific)
+prisma/engine*

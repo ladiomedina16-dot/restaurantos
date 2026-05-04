@@ -1,4 +1,10 @@
-// Load .env BEFORE any other imports (ESM hoisting safe)
+// ============================================================
+// RestaurantOS — Database Seed
+// SECURITY: All passwords read from environment variables.
+// No hardcoded credentials anywhere in this file.
+// If required env vars are missing, the seed ABORTS with a clear error.
+// ============================================================
+
 import 'dotenv/config'
 
 import { db } from '../src/lib/db'
@@ -6,7 +12,52 @@ import bcrypt from 'bcryptjs'
 
 const hash = (pw: string) => bcrypt.hashSync(pw, 12)
 
+// ─── Read passwords from environment ────────────────────────
+// These MUST be set before running the seed.
+// If any is missing, the seed aborts immediately.
+
+const SEED_SUPERADMIN_PASSWORD = process.env.SEED_SUPERADMIN_PASSWORD
+const SEED_ADMIN_PASSWORD      = process.env.SEED_ADMIN_PASSWORD
+const SEED_STAFF_PASSWORD      = process.env.SEED_STAFF_PASSWORD
+
+function validateSeedEnv() {
+  const missing: string[] = []
+  if (!SEED_SUPERADMIN_PASSWORD) missing.push('SEED_SUPERADMIN_PASSWORD')
+  if (!SEED_ADMIN_PASSWORD)      missing.push('SEED_ADMIN_PASSWORD')
+  if (!SEED_STAFF_PASSWORD)      missing.push('SEED_STAFF_PASSWORD')
+
+  if (missing.length > 0) {
+    console.error('\n' + '═'.repeat(60))
+    console.error('❌  SEED ABORTED — Missing required environment variables:')
+    console.error('═'.repeat(60))
+    for (const v of missing) {
+      console.error(`   • ${v}`)
+    }
+    console.error('\n   Set them before running the seed:')
+    console.error('   export SEED_SUPERADMIN_PASSWORD="<your-secure-password>"')
+    console.error('   export SEED_ADMIN_PASSWORD="<your-secure-password>"')
+    console.error('   export SEED_STAFF_PASSWORD="<your-secure-password>"')
+    console.error('\n   Or run in one line:')
+    console.error('   SEED_SUPERADMIN_PASSWORD="..." SEED_ADMIN_PASSWORD="..." SEED_STAFF_PASSWORD="..." bunx tsx prisma/seed.ts')
+    console.error('═'.repeat(60) + '\n')
+    process.exit(1)
+  }
+
+  // Warn if passwords are too short
+  const check = (name: string, pw: string) => {
+    if (pw.length < 8) {
+      console.warn(`⚠️  ${name} is too short (${pw.length} chars). Use at least 12 characters.`)
+    }
+  }
+  check('SEED_SUPERADMIN_PASSWORD', SEED_SUPERADMIN_PASSWORD!)
+  check('SEED_ADMIN_PASSWORD', SEED_ADMIN_PASSWORD!)
+  check('SEED_STAFF_PASSWORD', SEED_STAFF_PASSWORD!)
+}
+
 async function seed() {
+  // Validate env vars BEFORE touching the database
+  validateSeedEnv()
+
   console.log('🌱 Seeding RestaurantOS with real Sevillian data...\n')
 
   // ─── CLEAN SLATE: Delete existing data in correct order ────
@@ -44,16 +95,13 @@ async function seed() {
   // ═══════════════════════════════════════════════════════════
   // ⚠️  All users are created with mustChangePassword: true
   // They MUST change their password on first login.
-  // Passwords are NOT printed to console for security.
-  const PW_SUPER  = 'Super2024!'
-  const PW_ADMIN  = 'Admin2024!'
-  const PW_STAFF  = 'Sevilla2024!'
+  // Passwords are read from environment variables — NEVER printed.
 
   const userDefs = [
     // super_admin: acceso total, sin restaurante (ve todo)
     {
       username: 'superadmin',
-      passwordHash: hash(PW_SUPER),
+      passwordHash: hash(SEED_SUPERADMIN_PASSWORD!),
       name: 'Super Administrador',
       role: 'super_admin',
       active: true,
@@ -64,7 +112,7 @@ async function seed() {
     // admin: creado por super_admin al hacer onboarding
     {
       username: 'admin',
-      passwordHash: hash(PW_ADMIN),
+      passwordHash: hash(SEED_ADMIN_PASSWORD!),
       name: 'Antonio Reyes — Administrador',
       role: 'admin',
       active: true,
@@ -75,7 +123,7 @@ async function seed() {
     // Camareros con zona asignada
     {
       username: 'camarero_terraza',
-      passwordHash: hash(PW_STAFF),
+      passwordHash: hash(SEED_STAFF_PASSWORD!),
       name: 'María Solís — Camarera Terraza',
       role: 'camarero',
       active: true,
@@ -85,7 +133,7 @@ async function seed() {
     },
     {
       username: 'camarero_sala',
-      passwordHash: hash(PW_STAFF),
+      passwordHash: hash(SEED_STAFF_PASSWORD!),
       name: 'Javier Moreno — Camarero Salón',
       role: 'camarero',
       active: true,
@@ -95,7 +143,7 @@ async function seed() {
     },
     {
       username: 'camarero_barra',
-      passwordHash: hash(PW_STAFF),
+      passwordHash: hash(SEED_STAFF_PASSWORD!),
       name: 'Lucía Prieto — Camarera Barra',
       role: 'camarero',
       active: true,
@@ -106,7 +154,7 @@ async function seed() {
     // Cocina
     {
       username: 'cocinero',
-      passwordHash: hash(PW_STAFF),
+      passwordHash: hash(SEED_STAFF_PASSWORD!),
       name: 'Carlos Herrera — Cocinero Jefe',
       role: 'cocina',
       active: true,
@@ -117,7 +165,7 @@ async function seed() {
     // Encargado
     {
       username: 'encargado',
-      passwordHash: hash(PW_STAFF),
+      passwordHash: hash(SEED_STAFF_PASSWORD!),
       name: 'Rosa Delgado — Encargada',
       role: 'encargado',
       active: true,
@@ -128,7 +176,7 @@ async function seed() {
     // Caja
     {
       username: 'caja',
-      passwordHash: hash(PW_STAFF),
+      passwordHash: hash(SEED_STAFF_PASSWORD!),
       name: 'Pedro Naranjo — Caja',
       role: 'caja',
       active: true,
@@ -317,7 +365,7 @@ async function seed() {
   console.log('  💰 caja              │ user: caja')
   console.log('  ─────────────────────────────────────────────')
   console.log('\n  ⚠️  Las contraseñas iniciales NO se muestran por seguridad.')
-  console.log('     Debes haberlas definido al ejecutar este seed.')
+  console.log('     Fueron definidas mediante variables de entorno.')
   console.log('     TODOS los usuarios deben cambiar contraseña en el primer login.')
   console.log('\n  📋 PERMISOS POR ZONA:')
   console.log('  ─────────────────────────────────────────────')

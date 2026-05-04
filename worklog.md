@@ -32,3 +32,32 @@ Stage Summary:
 - Migration SQL file is ready for `prisma migrate deploy`
 - Seed no longer prints passwords to console
 - Auth no longer has hardcoded fallback secrets
+
+---
+Task ID: 2
+Agent: main
+Task: Urgent security fix — remove all exposed credentials, secure seed, create deployment guide
+
+Work Log:
+- Audited entire codebase for exposed credentials (grep for passwords, secrets, DB URLs)
+- Found hardcoded passwords in seed.ts: `Super2024!`, `Admin2024!`, `Sevilla2024!` — REMOVED
+- Rewrote seed.ts: all passwords now read from env vars (SEED_SUPERADMIN_PASSWORD, SEED_ADMIN_PASSWORD, SEED_STAFF_PASSWORD)
+- Seed aborts with clear error if any password env var is missing
+- Seed warns if passwords are too short (<8 chars)
+- No passwords are ever printed to console
+- Updated .env.example: added SEED_* password vars, all values empty, comprehensive comments
+- Updated .gitignore: added worklog*.md, prisma/engine* to prevent accidental commits
+- Updated package.json build script: `prisma migrate deploy && prisma generate && next build` (added migrate deploy for Vercel)
+- Cleaned migration SQL file: removed Prisma deprecation warning from migration.sql
+- Regenerated .env with fresh JWT_SECRET, JWT_REFRESH_SECRET, API_SECRET (old ones compromised)
+- Created DEPLOY.md: complete secure deployment guide with credential rotation instructions
+- Verified: no secrets in source code, no hardcoded passwords, lint passes, dev server runs
+- Note: Supabase DB password and service role key in .env still need to be rotated by the user in Supabase Dashboard
+
+Stage Summary:
+- All hardcoded passwords removed from seed.ts — uses env vars with abort on missing
+- .env.example has zero real secrets — only placeholders and format hints
+- .gitignore covers all .env files, worklogs, and sensitive artifacts
+- package.json build script includes prisma migrate deploy for production
+- Fresh JWT/API secrets generated (old ones assumed compromised)
+- DEPLOY.md provides complete secure deployment workflow + credential rotation checklist
