@@ -209,6 +209,35 @@ interface Client {
   _count?: { orders: number }
 }
 
+interface UserItem {
+  id: string
+  username: string
+  name: string
+  role: string
+  active: boolean
+  mustChangePassword: boolean
+  zone: string | null
+  restaurantId: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+interface DashboardData {
+  stats: {
+    totalOrdersToday: number
+    revenueToday: number
+    occupiedTables: number
+    totalActiveTables: number
+    totalActiveProducts: number
+    lowStockCount: number
+  }
+  topProducts: { productId: string; name: string; totalQuantity: number; totalRevenue: number }[]
+  lowStockProducts: { id: string; name: string; stock: number; category: string }[]
+  recentOrders: Order[]
+  ordersByStatus: { status: string; count: number }[]
+  categories: { category: string; count: number }[]
+}
+
 // ─── Category / Zone Config ─────────────────────────────────────────────────
 
 const categoryConfig: Record<string, { label: string; icon: React.ReactNode }> = {
@@ -2545,18 +2574,65 @@ function SuperAdminPanel() {
     }
   }
 
-  // "Ver restaurante" — enter that restaurant's context
+  // "Ver restaurante" — enter that restaurant's context with full admin tabs
+  const [saActiveTab, setSaActiveTab] = useState<string>('dashboard')
+  const viewedRestaurant = restaurants.find((r) => r.id === viewRestaurantId)
+
   if (viewRestaurantId) {
+    const saTabs = [
+      { id: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard className="size-4" /> },
+      { id: 'users', label: 'Usuarios', icon: <Users className="size-4" /> },
+      { id: 'tables', label: 'Mesas', icon: <UtensilsCrossed className="size-4" /> },
+      { id: 'products', label: 'Productos', icon: <Package className="size-4" /> },
+      { id: 'orders', label: 'Pedidos', icon: <Receipt className="size-4" /> },
+      { id: 'clients', label: 'Clientes', icon: <UserCircle className="size-4" /> },
+    ]
     return (
       <div className="space-y-4">
-        <div className="flex items-center gap-2">
-          <Button variant="ghost" size="sm" onClick={() => setViewRestaurantId(null)} className="gap-1">
-            <ArrowLeft className="size-4" />
-            Volver a Restaurantes
-          </Button>
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Button variant="ghost" size="sm" onClick={() => setViewRestaurantId(null)} className="gap-1">
+              <ArrowLeft className="size-4" />
+              Volver a Restaurantes
+            </Button>
+          </div>
+          <div className="flex items-center gap-2">
+            <Building2 className="size-5 text-amber-600" />
+            <span className="font-bold text-lg">{viewedRestaurant?.name ?? 'Restaurante'}</span>
+          </div>
         </div>
-        {/* Reuse ProductsTab with the selected restaurant context */}
-        <ProductsTab overrideRestaurantId={viewRestaurantId} />
+        <Tabs value={saActiveTab} onValueChange={setSaActiveTab}>
+          <TabsList className="h-10 bg-muted p-1">
+            {saTabs.map((tab) => (
+              <TabsTrigger
+                key={tab.id}
+                value={tab.id}
+                className="h-8 data-[state=active]:bg-background gap-1 text-xs font-medium px-3"
+              >
+                {tab.icon}
+                <span>{tab.label}</span>
+              </TabsTrigger>
+            ))}
+          </TabsList>
+          <TabsContent value="dashboard" className="mt-4">
+            <DashboardTab overrideRestaurantId={viewRestaurantId} />
+          </TabsContent>
+          <TabsContent value="users" className="mt-4">
+            <UsersTab overrideRestaurantId={viewRestaurantId} />
+          </TabsContent>
+          <TabsContent value="tables" className="mt-4">
+            <TablesTab overrideRestaurantId={viewRestaurantId} />
+          </TabsContent>
+          <TabsContent value="products" className="mt-4">
+            <ProductsTab overrideRestaurantId={viewRestaurantId} />
+          </TabsContent>
+          <TabsContent value="orders" className="mt-4">
+            <OrdersTab overrideRestaurantId={viewRestaurantId} />
+          </TabsContent>
+          <TabsContent value="clients" className="mt-4">
+            <ClientsTab overrideRestaurantId={viewRestaurantId} />
+          </TabsContent>
+        </Tabs>
       </div>
     )
   }
@@ -2792,14 +2868,1581 @@ function SuperAdminPanel() {
   )
 }
 
-// ─── ADMIN STUB TABS ────────────────────────────────────────────────────────
+// ─── Role / Status helpers ─────────────────────────────────────────────────
 
-function AdminStub({ title, icon }: { title: string; icon: React.ReactNode }) {
+const roleLabels: Record<string, string> = {
+  super_admin: 'Super Admin',
+  admin: 'Administrador',
+  encargado: 'Encargado',
+  camarero: 'Camarero',
+  cocina: 'Cocina',
+  caja: 'Caja',
+}
+
+const roleColors: Record<string, string> = {
+  super_admin: 'bg-purple-100 text-purple-800 border-purple-200',
+  admin: 'bg-red-100 text-red-800 border-red-200',
+  encargado: 'bg-blue-100 text-blue-800 border-blue-200',
+  camarero: 'bg-green-100 text-green-800 border-green-200',
+  cocina: 'bg-orange-100 text-orange-800 border-orange-200',
+  caja: 'bg-amber-100 text-amber-800 border-amber-200',
+}
+
+const orderStatusConfig: Record<string, { label: string; color: string }> = {
+  pending: { label: 'Pendiente', color: 'bg-amber-100 text-amber-800 border-amber-200' },
+  in_progress: { label: 'En preparación', color: 'bg-orange-100 text-orange-800 border-orange-200' },
+  ready: { label: 'Listo', color: 'bg-green-100 text-green-800 border-green-200' },
+  served: { label: 'Servido', color: 'bg-blue-100 text-blue-800 border-blue-200' },
+  paid: { label: 'Pagado', color: 'bg-emerald-100 text-emerald-800 border-emerald-200' },
+  cancelled: { label: 'Cancelado', color: 'bg-red-100 text-red-800 border-red-200' },
+}
+
+// ─── DASHBOARD TAB ──────────────────────────────────────────────────────────
+
+function DashboardTab({ overrideRestaurantId }: { overrideRestaurantId?: string } = {}) {
+  const { authHeaders, handleFetchResponse, currentUser } = useAuth()
+  const [data, setData] = useState<DashboardData | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  const fetchDashboard = useCallback(async () => {
+    try {
+      const headers = authHeaders(false)
+      if (overrideRestaurantId) headers['X-Restaurant-Id'] = overrideRestaurantId
+      const res = await fetch('/api/dashboard', { headers })
+      if (handleFetchResponse(res) && res.ok) {
+        const json = await res.json()
+        setData(json)
+      }
+    } catch { /* silently fail */ } finally {
+      setLoading(false)
+    }
+  }, [authHeaders, handleFetchResponse, overrideRestaurantId])
+
+  useEffect(() => {
+    fetchDashboard()
+    const interval = setInterval(fetchDashboard, 30000)
+    return () => clearInterval(interval)
+  }, [fetchDashboard])
+
+  if (loading) {
+    return (
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {Array.from({ length: 6 }).map((_, i) => (
+          <Skeleton key={i} className="h-28 rounded-xl" />
+        ))}
+      </div>
+    )
+  }
+
+  if (!data) {
+    return (
+      <Card className="rounded-xl">
+        <CardContent className="p-6 text-center text-muted-foreground">
+          No se pudieron cargar los datos del dashboard
+        </CardContent>
+      </Card>
+    )
+  }
+
+  const { stats, topProducts, lowStockProducts, recentOrders, ordersByStatus } = data
+
   return (
-    <div className="flex flex-col items-center justify-center py-20 text-muted-foreground">
-      <div className="mb-4 opacity-30">{icon}</div>
-      <h2 className="text-2xl font-bold mb-2">{title}</h2>
-      <p>Accede desde el panel de administración</p>
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <h2 className="text-2xl font-bold tracking-tight">Dashboard</h2>
+        <Button variant="outline" size="sm" className="h-9" onClick={fetchDashboard}>
+          <Clock className="size-4 mr-1" />
+          Actualizar
+        </Button>
+      </div>
+
+      {/* Stats Cards */}
+      <div className="grid gap-4 grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+        <Card className="rounded-xl">
+          <CardContent className="p-4">
+            <div className="flex items-center gap-2 text-muted-foreground mb-1">
+              <Receipt className="size-4" />
+              <span className="text-xs font-medium">Pedidos hoy</span>
+            </div>
+            <p className="text-2xl font-bold">{stats.totalOrdersToday}</p>
+          </CardContent>
+        </Card>
+        <Card className="rounded-xl">
+          <CardContent className="p-4">
+            <div className="flex items-center gap-2 text-muted-foreground mb-1">
+              <Euro className="size-4" />
+              <span className="text-xs font-medium">Ingresos hoy</span>
+            </div>
+            <p className="text-2xl font-bold text-green-700">{formatEUR(stats.revenueToday)}</p>
+          </CardContent>
+        </Card>
+        <Card className="rounded-xl">
+          <CardContent className="p-4">
+            <div className="flex items-center gap-2 text-muted-foreground mb-1">
+              <Utensils className="size-4" />
+              <span className="text-xs font-medium">Mesas ocupadas</span>
+            </div>
+            <p className="text-2xl font-bold">{stats.occupiedTables}<span className="text-sm text-muted-foreground font-normal">/{stats.totalActiveTables}</span></p>
+          </CardContent>
+        </Card>
+        <Card className="rounded-xl">
+          <CardContent className="p-4">
+            <div className="flex items-center gap-2 text-muted-foreground mb-1">
+              <Package className="size-4" />
+              <span className="text-xs font-medium">Productos activos</span>
+            </div>
+            <p className="text-2xl font-bold">{stats.totalActiveProducts}</p>
+          </CardContent>
+        </Card>
+        <Card className="rounded-xl">
+          <CardContent className="p-4">
+            <div className="flex items-center gap-2 text-amber-600 mb-1">
+              <AlertTriangle className="size-4" />
+              <span className="text-xs font-medium">Stock bajo</span>
+            </div>
+            <p className="text-2xl font-bold text-amber-700">{stats.lowStockCount}</p>
+          </CardContent>
+        </Card>
+        <Card className="rounded-xl">
+          <CardContent className="p-4">
+            <div className="flex items-center gap-2 text-muted-foreground mb-1">
+              <Star className="size-4" />
+              <span className="text-xs font-medium">Ocupación</span>
+            </div>
+            <p className="text-2xl font-bold">{stats.totalActiveTables > 0 ? Math.round((stats.occupiedTables / stats.totalActiveTables) * 100) : 0}%</p>
+          </CardContent>
+        </Card>
+      </div>
+
+      <div className="grid gap-6 lg:grid-cols-2">
+        {/* Orders by Status */}
+        <Card className="rounded-xl">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base">Pedidos por estado</CardTitle>
+          </CardHeader>
+          <CardContent className="p-4 pt-0">
+            {ordersByStatus.length === 0 ? (
+              <p className="text-sm text-muted-foreground text-center py-4">No hay pedidos activos</p>
+            ) : (
+              <div className="space-y-2">
+                {ordersByStatus.map((item) => {
+                  const cfg = orderStatusConfig[item.status]
+                  return (
+                    <div key={item.status} className="flex items-center justify-between">
+                      <Badge variant="outline" className={cfg?.color ?? 'bg-gray-100 text-gray-800'}>{cfg?.label ?? item.status}</Badge>
+                      <span className="font-bold">{item.count}</span>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Top Products */}
+        <Card className="rounded-xl">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base">Top productos hoy</CardTitle>
+          </CardHeader>
+          <CardContent className="p-4 pt-0">
+            {topProducts.length === 0 ? (
+              <p className="text-sm text-muted-foreground text-center py-4">Sin datos de ventas hoy</p>
+            ) : (
+              <div className="space-y-2">
+                {topProducts.map((product, idx) => (
+                  <div key={product.productId} className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="flex size-6 items-center justify-center rounded-full bg-amber-100 text-amber-800 text-xs font-bold">{idx + 1}</span>
+                      <span className="text-sm font-medium">{product.name}</span>
+                    </div>
+                    <div className="text-right">
+                      <span className="text-sm font-bold">{product.totalQuantity}u</span>
+                      <span className="text-xs text-muted-foreground ml-2">{formatEUR(product.totalRevenue)}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      <div className="grid gap-6 lg:grid-cols-2">
+        {/* Low Stock Products */}
+        {lowStockProducts.length > 0 && (
+          <Card className="rounded-xl border-amber-200">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base flex items-center gap-2">
+                <AlertTriangle className="size-4 text-amber-600" />
+                Productos con stock bajo
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-4 pt-0">
+              <div className="space-y-2">
+                {lowStockProducts.map((product) => (
+                  <div key={product.id} className="flex items-center justify-between">
+                    <span className="text-sm font-medium">{product.name}</span>
+                    <Badge variant="outline" className="bg-red-50 text-red-700 border-red-200">{product.stock} uds</Badge>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Recent Orders */}
+        <Card className="rounded-xl">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base">Últimos pedidos</CardTitle>
+          </CardHeader>
+          <CardContent className="p-4 pt-0">
+            <div className="space-y-2 max-h-64 overflow-y-auto">
+              {recentOrders.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-4">No hay pedidos</p>
+              ) : (
+                recentOrders.map((order) => {
+                  const cfg = orderStatusConfig[order.status]
+                  return (
+                    <div key={order.id} className="flex items-center justify-between text-sm">
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold">M{order.table?.number ?? '?'}</span>
+                        <Badge variant="outline" className={`text-xs ${cfg?.color ?? ''}`}>{cfg?.label ?? order.status}</Badge>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold">{formatEUR(order.total)}</span>
+                        <span className="text-xs text-muted-foreground">{timeAgo(order.createdAt)}</span>
+                      </div>
+                    </div>
+                  )
+                })
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  )
+}
+
+// ─── USERS TAB ──────────────────────────────────────────────────────────────
+
+function UsersTab({ overrideRestaurantId }: { overrideRestaurantId?: string } = {}) {
+  const { authHeaders, handleFetchResponse, currentUser } = useAuth()
+  const [users, setUsers] = useState<UserItem[]>([])
+  const [loading, setLoading] = useState(true)
+  const [showCreateDialog, setShowCreateDialog] = useState(false)
+  const [showResetDialog, setShowResetDialog] = useState(false)
+  const [resetUserId, setResetUserId] = useState<string | null>(null)
+  const [newPassword, setNewPassword] = useState('')
+  const [searchQuery, setSearchQuery] = useState('')
+
+  // Create user form
+  const [formUsername, setFormUsername] = useState('')
+  const [formPassword, setFormPassword] = useState('')
+  const [formName, setFormName] = useState('')
+  const [formRole, setFormRole] = useState('camarero')
+  const [formZone, setFormZone] = useState<string>('')
+  const [formActive, setFormActive] = useState(true)
+  const [creating, setCreating] = useState(false)
+  const [resetting, setResetting] = useState(false)
+
+  const canCreate = currentUser && clientHasPermission(currentUser.role, 'users:create')
+  const canUpdate = currentUser && clientHasPermission(currentUser.role, 'users:update')
+  const canDelete = currentUser && clientHasPermission(currentUser.role, 'users:delete')
+
+  const fetchUsers = useCallback(async () => {
+    try {
+      const headers = authHeaders(false)
+      if (overrideRestaurantId) headers['X-Restaurant-Id'] = overrideRestaurantId
+      const res = await fetch('/api/users', { headers })
+      if (handleFetchResponse(res) && res.ok) {
+        const json = await res.json()
+        setUsers(json.users)
+      }
+    } catch { /* silently fail */ } finally {
+      setLoading(false)
+    }
+  }, [authHeaders, handleFetchResponse, overrideRestaurantId])
+
+  useEffect(() => {
+    fetchUsers()
+  }, [fetchUsers])
+
+  const handleCreateUser = async () => {
+    if (!formUsername || !formPassword || !formName) {
+      toast.error('Completa todos los campos obligatorios')
+      return
+    }
+    setCreating(true)
+    try {
+      const body: Record<string, unknown> = {
+        username: formUsername,
+        password: formPassword,
+        name: formName,
+        role: formRole,
+        active: formActive,
+        mustChangePassword: true,
+      }
+      if (overrideRestaurantId) body.restaurantId = overrideRestaurantId
+      if (formRole === 'camarero' && formZone) {
+        body.zone = formZone
+      }
+      const headers = authHeaders()
+      if (overrideRestaurantId) headers['X-Restaurant-Id'] = overrideRestaurantId
+      const res = await fetch('/api/users', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(body),
+      })
+      if (handleFetchResponse(res) && res.ok) {
+        toast.success('Usuario creado correctamente')
+        setShowCreateDialog(false)
+        setFormUsername('')
+        setFormPassword('')
+        setFormName('')
+        setFormRole('camarero')
+        setFormZone('')
+        setFormActive(true)
+        fetchUsers()
+      } else {
+        const err = await res.json()
+        toast.error(err.error || 'Error al crear usuario')
+      }
+    } catch {
+      toast.error('Error de red')
+    } finally {
+      setCreating(false)
+    }
+  }
+
+  const handleToggleActive = async (user: UserItem) => {
+    try {
+      const headers = authHeaders()
+      if (overrideRestaurantId) headers['X-Restaurant-Id'] = overrideRestaurantId
+      const res = await fetch('/api/users', {
+        method: 'PUT',
+        headers,
+        body: JSON.stringify({ id: user.id, active: !user.active }),
+      })
+      if (handleFetchResponse(res) && res.ok) {
+        toast.success(user.active ? 'Usuario desactivado' : 'Usuario activado')
+        fetchUsers()
+      } else {
+        const err = await res.json()
+        toast.error(err.error || 'Error al actualizar usuario')
+      }
+    } catch {
+      toast.error('Error de red')
+    }
+  }
+
+  const handleResetPassword = async () => {
+    if (!resetUserId || !newPassword) return
+    setResetting(true)
+    try {
+      const headers = authHeaders()
+      if (overrideRestaurantId) headers['X-Restaurant-Id'] = overrideRestaurantId
+      const res = await fetch(`/api/users/${resetUserId}/reset-password`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ newPassword }),
+      })
+      if (handleFetchResponse(res) && res.ok) {
+        toast.success('Contraseña restablecida')
+        setShowResetDialog(false)
+        setResetUserId(null)
+        setNewPassword('')
+      } else {
+        const err = await res.json()
+        toast.error(err.error || 'Error al restablecer contraseña')
+      }
+    } catch {
+      toast.error('Error de red')
+    } finally {
+      setResetting(false)
+    }
+  }
+
+  const filteredUsers = users.filter((u) => {
+    if (!searchQuery) return true
+    const q = searchQuery.toLowerCase()
+    return u.name.toLowerCase().includes(q) || u.username.toLowerCase().includes(q) || u.role.toLowerCase().includes(q)
+  })
+
+  if (loading) {
+    return (
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {Array.from({ length: 6 }).map((_, i) => (
+          <Skeleton key={i} className="h-28 rounded-xl" />
+        ))}
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <h2 className="text-2xl font-bold tracking-tight">Equipo</h2>
+        <div className="flex items-center gap-2">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              placeholder="Buscar..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="pl-9 h-9 w-48"
+            />
+          </div>
+          {canCreate && (
+            <Button size="sm" className="h-9 bg-amber-600 hover:bg-amber-700 text-white" onClick={() => setShowCreateDialog(true)}>
+              <Plus className="size-4 mr-1" />
+              Nuevo
+            </Button>
+          )}
+        </div>
+      </div>
+
+      {/* Users List */}
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        {filteredUsers.map((user) => (
+          <Card key={user.id} className={`rounded-xl ${!user.active ? 'opacity-60' : ''}`}>
+            <CardContent className="p-4">
+              <div className="flex items-start justify-between mb-2">
+                <div>
+                  <p className="font-bold text-base">{user.name}</p>
+                  <p className="text-xs text-muted-foreground">@{user.username}</p>
+                </div>
+                <div className="flex items-center gap-1">
+                  {canUpdate && user.id !== currentUser?.userId && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="size-8 p-0"
+                      onClick={() => handleToggleActive(user)}
+                      title={user.active ? 'Desactivar' : 'Activar'}
+                    >
+                      {user.active ? <Shield className="size-4 text-green-600" /> : <ShieldOff className="size-4 text-red-400" />}
+                    </Button>
+                  )}
+                  {canUpdate && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="size-8 p-0"
+                      onClick={() => { setResetUserId(user.id); setShowResetDialog(true) }}
+                      title="Restablecer contraseña"
+                    >
+                      <Lock className="size-4 text-muted-foreground" />
+                    </Button>
+                  )}
+                </div>
+              </div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <Badge variant="outline" className={roleColors[user.role] ?? 'bg-gray-100 text-gray-800'}>
+                  {roleLabels[user.role] ?? user.role}
+                </Badge>
+                {user.zone && (
+                  <Badge variant="outline" className="bg-gray-50 text-gray-700">
+                    {zoneConfig[user.zone]?.label ?? user.zone}
+                  </Badge>
+                )}
+                {user.mustChangePassword && (
+                  <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200">
+                    <Lock className="size-3 mr-1" />
+                    Cambio pendiente
+                  </Badge>
+                )}
+                {!user.active && (
+                  <Badge variant="outline" className="bg-red-50 text-red-700 border-red-200">Inactivo</Badge>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+
+      {filteredUsers.length === 0 && (
+        <Card className="rounded-xl">
+          <CardContent className="p-6 text-center text-muted-foreground">
+            No se encontraron usuarios
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Create User Dialog */}
+      <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Nuevo usuario</DialogTitle>
+            <DialogDescription>Crea un nuevo miembro del equipo</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>Nombre de usuario *</Label>
+              <Input value={formUsername} onChange={(e) => setFormUsername(e.target.value)} placeholder="usuario" />
+            </div>
+            <div className="space-y-2">
+              <Label>Contraseña *</Label>
+              <Input type="password" value={formPassword} onChange={(e) => setFormPassword(e.target.value)} placeholder="••••" />
+            </div>
+            <div className="space-y-2">
+              <Label>Nombre completo *</Label>
+              <Input value={formName} onChange={(e) => setFormName(e.target.value)} placeholder="Juan García" />
+            </div>
+            <div className="space-y-2">
+              <Label>Rol</Label>
+              <Select value={formRole} onValueChange={setFormRole}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {currentUser?.role === 'super_admin' && <SelectItem value="super_admin">Super Admin</SelectItem>}
+                  {(currentUser?.role === 'super_admin' || currentUser?.role === 'admin') && <SelectItem value="admin">Administrador</SelectItem>}
+                  <SelectItem value="encargado">Encargado</SelectItem>
+                  <SelectItem value="camarero">Camarero</SelectItem>
+                  <SelectItem value="cocina">Cocina</SelectItem>
+                  <SelectItem value="caja">Caja</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            {formRole === 'camarero' && (
+              <div className="space-y-2">
+                <Label>Zona</Label>
+                <Select value={formZone} onValueChange={setFormZone}>
+                  <SelectTrigger><SelectValue placeholder="Sin zona asignada" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="bar">Barra</SelectItem>
+                    <SelectItem value="main">Salón</SelectItem>
+                    <SelectItem value="terrace">Terraza</SelectItem>
+                    <SelectItem value="private">Privado</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+            <div className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                id="userActive"
+                checked={formActive}
+                onChange={(e) => setFormActive(e.target.checked)}
+                className="rounded border-gray-300"
+              />
+              <Label htmlFor="userActive">Activo</Label>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowCreateDialog(false)}>Cancelar</Button>
+            <Button className="bg-amber-600 hover:bg-amber-700 text-white" onClick={handleCreateUser} disabled={creating}>
+              {creating ? 'Creando...' : 'Crear usuario'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Reset Password Dialog */}
+      <Dialog open={showResetDialog} onOpenChange={setShowResetDialog}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Restablecer contraseña</DialogTitle>
+            <DialogDescription>El usuario deberá cambiarla en su próximo inicio de sesión</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>Nueva contraseña</Label>
+              <Input type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} placeholder="••••" />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setShowResetDialog(false); setResetUserId(null); setNewPassword('') }}>Cancelar</Button>
+            <Button className="bg-amber-600 hover:bg-amber-700 text-white" onClick={handleResetPassword} disabled={resetting || !newPassword}>
+              {resetting ? 'Restableciendo...' : 'Restablecer'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  )
+}
+
+// ─── TABLES TAB ─────────────────────────────────────────────────────────────
+
+function TablesTab({ overrideRestaurantId }: { overrideRestaurantId?: string } = {}) {
+  const { authHeaders, handleFetchResponse, currentUser } = useAuth()
+  const [tables, setTables] = useState<TableItem[]>([])
+  const [loading, setLoading] = useState(true)
+  const [showCreateDialog, setShowCreateDialog] = useState(false)
+  const [showBulkDialog, setShowBulkDialog] = useState(false)
+  const [showEditDialog, setShowEditDialog] = useState(false)
+  const [editingTable, setEditingTable] = useState<TableItem | null>(null)
+
+  // Create form
+  const [formNumber, setFormNumber] = useState('')
+  const [formCapacity, setFormCapacity] = useState('4')
+  const [formZone, setFormZone] = useState('main')
+  const [formNotes, setFormNotes] = useState('')
+  const [creating, setCreating] = useState(false)
+
+  // Bulk create form
+  const [bulkZone, setBulkZone] = useState('main')
+  const [bulkStart, setBulkStart] = useState('1')
+  const [bulkCount, setBulkCount] = useState('5')
+  const [bulkCapacity, setBulkCapacity] = useState('4')
+  const [bulkCreating, setBulkCreating] = useState(false)
+
+  // Edit form
+  const [editNumber, setEditNumber] = useState('')
+  const [editCapacity, setEditCapacity] = useState('')
+  const [editZone, setEditZone] = useState('')
+  const [editNotes, setEditNotes] = useState('')
+  const [editActive, setEditActive] = useState(true)
+  const [saving, setSaving] = useState(false)
+
+  const canCreate = currentUser && clientHasPermission(currentUser.role, 'tables:create')
+  const canUpdate = currentUser && clientHasPermission(currentUser.role, 'tables:update')
+  const canDelete = currentUser && clientHasPermission(currentUser.role, 'tables:delete')
+
+  const fetchTables = useCallback(async () => {
+    try {
+      const headers = authHeaders(false)
+      if (overrideRestaurantId) headers['X-Restaurant-Id'] = overrideRestaurantId
+      const res = await fetch('/api/tables', { headers })
+      if (handleFetchResponse(res) && res.ok) {
+        const json = await res.json()
+        setTables(json.tables)
+      }
+    } catch { /* silently fail */ } finally {
+      setLoading(false)
+    }
+  }, [authHeaders, handleFetchResponse, overrideRestaurantId])
+
+  useEffect(() => {
+    fetchTables()
+  }, [fetchTables])
+
+  const handleCreateTable = async () => {
+    if (!formNumber || !formCapacity) {
+      toast.error('Número y capacidad son obligatorios')
+      return
+    }
+    setCreating(true)
+    try {
+      const headers = authHeaders()
+      if (overrideRestaurantId) headers['X-Restaurant-Id'] = overrideRestaurantId
+      const res = await fetch('/api/tables', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          number: parseInt(formNumber),
+          capacity: parseInt(formCapacity),
+          zone: formZone,
+          notes: formNotes,
+        }),
+      })
+      if (handleFetchResponse(res) && res.ok) {
+        toast.success('Mesa creada')
+        setShowCreateDialog(false)
+        setFormNumber('')
+        setFormCapacity('4')
+        setFormNotes('')
+        fetchTables()
+      } else {
+        const err = await res.json()
+        toast.error(err.error || 'Error al crear mesa')
+      }
+    } catch {
+      toast.error('Error de red')
+    } finally {
+      setCreating(false)
+    }
+  }
+
+  const handleBulkCreate = async () => {
+    const start = parseInt(bulkStart)
+    const count = parseInt(bulkCount)
+    const cap = parseInt(bulkCapacity)
+    if (!start || !count || !cap || count > 50) {
+      toast.error('Valores no válidos (máximo 50 mesas)')
+      return
+    }
+    setBulkCreating(true)
+    let created = 0
+    try {
+      for (let i = 0; i < count; i++) {
+        const headers = authHeaders()
+        if (overrideRestaurantId) headers['X-Restaurant-Id'] = overrideRestaurantId
+        const res = await fetch('/api/tables', {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            number: start + i,
+            capacity: cap,
+            zone: bulkZone,
+            notes: '',
+          }),
+        })
+        if (res.ok) created++
+      }
+      toast.success(`${created} mesas creadas en ${zoneConfig[bulkZone]?.label ?? bulkZone}`)
+      setShowBulkDialog(false)
+      fetchTables()
+    } catch {
+      toast.error('Error de red')
+    } finally {
+      setBulkCreating(false)
+    }
+  }
+
+  const handleEditTable = async () => {
+    if (!editingTable) return
+    setSaving(true)
+    try {
+      const headers = authHeaders()
+      if (overrideRestaurantId) headers['X-Restaurant-Id'] = overrideRestaurantId
+      const res = await fetch(`/api/tables/${editingTable.id}`, {
+        method: 'PUT',
+        headers,
+        body: JSON.stringify({
+          number: parseInt(editNumber),
+          capacity: parseInt(editCapacity),
+          zone: editZone,
+          notes: editNotes,
+          active: editActive,
+        }),
+      })
+      if (handleFetchResponse(res) && res.ok) {
+        toast.success('Mesa actualizada')
+        setShowEditDialog(false)
+        setEditingTable(null)
+        fetchTables()
+      } else {
+        const err = await res.json()
+        toast.error(err.error || 'Error al actualizar mesa')
+      }
+    } catch {
+      toast.error('Error de red')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleDeleteTable = async (table: TableItem) => {
+    try {
+      const headers = authHeaders()
+      if (overrideRestaurantId) headers['X-Restaurant-Id'] = overrideRestaurantId
+      const res = await fetch(`/api/tables/${table.id}`, {
+        method: 'DELETE',
+        headers,
+      })
+      if (handleFetchResponse(res) && res.ok) {
+        toast.success('Mesa eliminada')
+        fetchTables()
+      } else {
+        const err = await res.json()
+        toast.error(err.error || 'Error al eliminar mesa')
+      }
+    } catch {
+      toast.error('Error de red')
+    }
+  }
+
+  const openEditDialog = (table: TableItem) => {
+    setEditingTable(table)
+    setEditNumber(String(table.number))
+    setEditCapacity(String(table.capacity))
+    setEditZone(table.zone)
+    setEditNotes(table.notes || '')
+    setEditActive(table.active)
+    setShowEditDialog(true)
+  }
+
+  // Group tables by zone
+  const tablesByZone = zoneOrder
+    .map((z) => ({
+      zone: z,
+      config: zoneConfig[z],
+      zoneTables: tables.filter((t) => t.zone === z),
+    }))
+
+  if (loading) {
+    return (
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {Array.from({ length: 6 }).map((_, i) => (
+          <Skeleton key={i} className="h-28 rounded-xl" />
+        ))}
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <h2 className="text-2xl font-bold tracking-tight">Mesas</h2>
+        <div className="flex items-center gap-2">
+          {canCreate && (
+            <>
+              <Button size="sm" variant="outline" className="h-9" onClick={() => setShowBulkDialog(true)}>
+                <Plus className="size-4 mr-1" />
+                Crear por zona
+              </Button>
+              <Button size="sm" className="h-9 bg-amber-600 hover:bg-amber-700 text-white" onClick={() => setShowCreateDialog(true)}>
+                <Plus className="size-4 mr-1" />
+                Nueva mesa
+              </Button>
+            </>
+          )}
+        </div>
+      </div>
+
+      {tables.length === 0 ? (
+        <Card className="rounded-xl">
+          <CardContent className="p-6 text-center">
+            <Utensils className="size-12 mx-auto text-muted-foreground mb-3" />
+            <p className="text-muted-foreground mb-3">No hay mesas configuradas</p>
+            {canCreate && (
+              <Button className="bg-amber-600 hover:bg-amber-700 text-white" onClick={() => setShowBulkDialog(true)}>
+                <Plus className="size-4 mr-1" />
+                Configurar Mesas
+              </Button>
+            )}
+          </CardContent>
+        </Card>
+      ) : (
+        tablesByZone.map(({ zone, config: cfg, zoneTables }) => (
+          <div key={zone}>
+            <div className="flex items-center gap-2 mb-3">
+              {cfg?.icon ?? <CircleDot className="size-4" />}
+              <h3 className="font-semibold text-lg">{cfg?.label ?? zone}</h3>
+              <Badge variant="outline" className="text-xs">{zoneTables.length}</Badge>
+            </div>
+            <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-8 gap-3">
+              {zoneTables.map((table) => {
+                const isAvailable = table.status === 'available'
+                const isOccupied = table.status === 'occupied'
+                return (
+                  <div
+                    key={table.id}
+                    className={`relative flex flex-col items-center justify-center p-3 rounded-xl border-2 min-h-[90px] ${
+                      !table.active
+                        ? 'bg-gray-100 border-gray-200 opacity-60'
+                        : isOccupied
+                        ? 'bg-orange-50 border-orange-300'
+                        : isAvailable
+                        ? 'bg-green-50 border-green-300'
+                        : 'bg-amber-50 border-amber-300'
+                    }`}
+                  >
+                    <span className="text-2xl font-bold">{table.number}</span>
+                    <span className="text-xs text-muted-foreground">{table.capacity} pax</span>
+                    {!table.active && <span className="text-xs text-red-500">Inactiva</span>}
+                    <div className="absolute top-1 right-1 flex gap-0.5">
+                      {canUpdate && (
+                        <button className="p-1 rounded hover:bg-white/60" onClick={() => openEditDialog(table)}>
+                          <Pencil className="size-3 text-muted-foreground" />
+                        </button>
+                      )}
+                      {canDelete && (
+                        <button className="p-1 rounded hover:bg-white/60" onClick={() => handleDeleteTable(table)}>
+                          <Trash2 className="size-3 text-red-400" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        ))
+      )}
+
+      {/* Create Table Dialog */}
+      <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Nueva mesa</DialogTitle>
+            <DialogDescription>Añade una mesa al restaurante</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Número *</Label>
+                <Input type="number" value={formNumber} onChange={(e) => setFormNumber(e.target.value)} placeholder="1" />
+              </div>
+              <div className="space-y-2">
+                <Label>Capacidad *</Label>
+                <Input type="number" value={formCapacity} onChange={(e) => setFormCapacity(e.target.value)} placeholder="4" />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label>Zona</Label>
+              <Select value={formZone} onValueChange={setFormZone}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {zoneOrder.map((z) => (
+                    <SelectItem key={z} value={z}>{zoneConfig[z]?.label ?? z}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>Notas</Label>
+              <Input value={formNotes} onChange={(e) => setFormNotes(e.target.value)} placeholder="Ventana, junto a la barra..." />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowCreateDialog(false)}>Cancelar</Button>
+            <Button className="bg-amber-600 hover:bg-amber-700 text-white" onClick={handleCreateTable} disabled={creating}>
+              {creating ? 'Creando...' : 'Crear mesa'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Bulk Create Dialog */}
+      <Dialog open={showBulkDialog} onOpenChange={setShowBulkDialog}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Crear mesas por zona</DialogTitle>
+            <DialogDescription>Crea múltiples mesas de una vez para una zona</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>Zona</Label>
+              <Select value={bulkZone} onValueChange={setBulkZone}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {zoneOrder.map((z) => (
+                    <SelectItem key={z} value={z}>{zoneConfig[z]?.label ?? z}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid grid-cols-3 gap-4">
+              <div className="space-y-2">
+                <Label>Nº inicio</Label>
+                <Input type="number" value={bulkStart} onChange={(e) => setBulkStart(e.target.value)} placeholder="1" />
+              </div>
+              <div className="space-y-2">
+                <Label>Cantidad</Label>
+                <Input type="number" value={bulkCount} onChange={(e) => setBulkCount(e.target.value)} placeholder="5" />
+              </div>
+              <div className="space-y-2">
+                <Label>Capacidad</Label>
+                <Input type="number" value={bulkCapacity} onChange={(e) => setBulkCapacity(e.target.value)} placeholder="4" />
+              </div>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Se crearán {bulkCount || 0} mesas numeradas de la {bulkStart || 0} a la {(parseInt(bulkStart) || 0) + (parseInt(bulkCount) || 0) - 1} en {zoneConfig[bulkZone]?.label ?? bulkZone}
+            </p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowBulkDialog(false)}>Cancelar</Button>
+            <Button className="bg-amber-600 hover:bg-amber-700 text-white" onClick={handleBulkCreate} disabled={bulkCreating}>
+              {bulkCreating ? 'Creando...' : `Crear ${bulkCount || 0} mesas`}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Table Dialog */}
+      <Dialog open={showEditDialog} onOpenChange={setShowEditDialog}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Editar mesa {editingTable?.number}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Número</Label>
+                <Input type="number" value={editNumber} onChange={(e) => setEditNumber(e.target.value)} />
+              </div>
+              <div className="space-y-2">
+                <Label>Capacidad</Label>
+                <Input type="number" value={editCapacity} onChange={(e) => setEditCapacity(e.target.value)} />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label>Zona</Label>
+              <Select value={editZone} onValueChange={setEditZone}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {zoneOrder.map((z) => (
+                    <SelectItem key={z} value={z}>{zoneConfig[z]?.label ?? z}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>Notas</Label>
+              <Input value={editNotes} onChange={(e) => setEditNotes(e.target.value)} />
+            </div>
+            <div className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                id="editActive"
+                checked={editActive}
+                onChange={(e) => setEditActive(e.target.checked)}
+                className="rounded border-gray-300"
+              />
+              <Label htmlFor="editActive">Activa</Label>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowEditDialog(false)}>Cancelar</Button>
+            <Button className="bg-amber-600 hover:bg-amber-700 text-white" onClick={handleEditTable} disabled={saving}>
+              {saving ? 'Guardando...' : 'Guardar'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  )
+}
+
+// ─── ORDERS TAB ─────────────────────────────────────────────────────────────
+
+function OrdersTab({ overrideRestaurantId }: { overrideRestaurantId?: string } = {}) {
+  const { authHeaders, handleFetchResponse, currentUser } = useAuth()
+  const [orders, setOrders] = useState<Order[]>([])
+  const [loading, setLoading] = useState(true)
+  const [statusFilter, setStatusFilter] = useState<string>('')
+  const [selectedOrder, setSelectedOrder] = useState<Order | null>(null)
+  const [showDetailDialog, setShowDetailDialog] = useState(false)
+  const [updatingStatus, setUpdatingStatus] = useState<string | null>(null)
+
+  const canUpdate = currentUser && clientHasPermission(currentUser.role, 'orders:update')
+
+  const fetchOrders = useCallback(async () => {
+    try {
+      const url = statusFilter ? `/api/orders?status=${statusFilter}` : '/api/orders'
+      const headers = authHeaders(false)
+      if (overrideRestaurantId) headers['X-Restaurant-Id'] = overrideRestaurantId
+      const res = await fetch(url, { headers })
+      if (handleFetchResponse(res) && res.ok) {
+        const json = await res.json()
+        setOrders(json.orders)
+      }
+    } catch { /* silently fail */ } finally {
+      setLoading(false)
+    }
+  }, [authHeaders, handleFetchResponse, statusFilter, overrideRestaurantId])
+
+  useEffect(() => {
+    fetchOrders()
+    const interval = setInterval(fetchOrders, 10000)
+    return () => clearInterval(interval)
+  }, [fetchOrders])
+
+  const handleStatusChange = async (orderId: string, newStatus: string) => {
+    setUpdatingStatus(orderId)
+    try {
+      const headers = authHeaders()
+      if (overrideRestaurantId) headers['X-Restaurant-Id'] = overrideRestaurantId
+      const res = await fetch(`/api/orders/${orderId}`, {
+        method: 'PUT',
+        headers,
+        body: JSON.stringify({ status: newStatus }),
+      })
+      if (handleFetchResponse(res) && res.ok) {
+        toast.success('Estado actualizado')
+        fetchOrders()
+      } else {
+        const err = await res.json()
+        toast.error(err.error || 'Error al actualizar estado')
+      }
+    } catch {
+      toast.error('Error de red')
+    } finally {
+      setUpdatingStatus(null)
+    }
+  }
+
+  const statusFilters = [
+    { value: '', label: 'Todos' },
+    { value: 'pending', label: 'Pendientes' },
+    { value: 'in_progress', label: 'En preparación' },
+    { value: 'ready', label: 'Listos' },
+    { value: 'served', label: 'Servidos' },
+    { value: 'paid', label: 'Pagados' },
+    { value: 'cancelled', label: 'Cancelados' },
+  ]
+
+  const getNextStatus = (currentStatus: string): string | null => {
+    switch (currentStatus) {
+      case 'pending': return 'in_progress'
+      case 'in_progress': return 'ready'
+      case 'ready': return 'served'
+      case 'served': return 'paid'
+      default: return null
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {Array.from({ length: 6 }).map((_, i) => (
+          <Skeleton key={i} className="h-28 rounded-xl" />
+        ))}
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <h2 className="text-2xl font-bold tracking-tight">Pedidos</h2>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" className="h-9" onClick={fetchOrders}>
+            <Clock className="size-4 mr-1" />
+            Actualizar
+          </Button>
+        </div>
+      </div>
+
+      {/* Status filters */}
+      <div className="flex gap-1.5 overflow-x-auto pb-1" style={{ scrollbarWidth: 'none' }}>
+        {statusFilters.map((filter) => (
+          <Button
+            key={filter.value}
+            variant={statusFilter === filter.value ? 'default' : 'outline'}
+            size="sm"
+            className={`h-8 shrink-0 text-xs ${statusFilter === filter.value ? 'bg-amber-600 hover:bg-amber-700 text-white' : ''}`}
+            onClick={() => { setStatusFilter(filter.value); setLoading(true) }}
+          >
+            {filter.label}
+          </Button>
+        ))}
+      </div>
+
+      {/* Orders list */}
+      {orders.length === 0 ? (
+        <Card className="rounded-xl">
+          <CardContent className="p-6 text-center text-muted-foreground">
+            No hay pedidos
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="space-y-2">
+          {orders.map((order) => {
+            const cfg = orderStatusConfig[order.status]
+            const nextStatus = getNextStatus(order.status)
+            return (
+              <Card key={order.id} className="rounded-xl cursor-pointer hover:bg-amber-50/50 transition-colors" onClick={() => { setSelectedOrder(order); setShowDetailDialog(true) }}>
+                <CardContent className="p-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="flex size-10 items-center justify-center rounded-lg bg-amber-100 text-amber-800 font-bold">
+                        M{order.table?.number ?? '?'}
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <Badge variant="outline" className={cfg?.color ?? ''}>{cfg?.label ?? order.status}</Badge>
+                          <span className="text-xs text-muted-foreground">{zoneConfig[order.table?.zone]?.label}</span>
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                          {order.items.length} items · {timeAgo(order.createdAt)}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <span className="font-bold">{formatEUR(order.total)}</span>
+                      {canUpdate && nextStatus && (
+                        <Button
+                          size="sm"
+                          className="h-8 bg-amber-600 hover:bg-amber-700 text-white text-xs"
+                          disabled={updatingStatus === order.id}
+                          onClick={(e) => { e.stopPropagation(); handleStatusChange(order.id, nextStatus) }}
+                        >
+                          {updatingStatus === order.id ? '...' : orderStatusConfig[nextStatus]?.label ?? nextStatus}
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            )
+          })}
+        </div>
+      )}
+
+      {/* Order Detail Dialog */}
+      <Dialog open={showDetailDialog} onOpenChange={setShowDetailDialog}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>
+              Pedido — Mesa {selectedOrder?.table?.number ?? '?'}
+            </DialogTitle>
+            <DialogDescription>
+              {selectedOrder && (
+                <span>
+                  {zoneConfig[selectedOrder.table?.zone]?.label} · {formatTime(selectedOrder.createdAt)} ·{' '}
+                  <Badge variant="outline" className={orderStatusConfig[selectedOrder.status]?.color ?? ''}>
+                    {orderStatusConfig[selectedOrder.status]?.label ?? selectedOrder.status}
+                  </Badge>
+                </span>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          {selectedOrder && (
+            <div className="space-y-4">
+              {/* Items */}
+              <div className="space-y-2">
+                <Label className="text-xs text-muted-foreground uppercase">Productos</Label>
+                {selectedOrder.items.map((item) => (
+                  <div key={item.id} className="flex items-center justify-between text-sm">
+                    <div className="flex items-center gap-2">
+                      <span className="flex size-6 items-center justify-center rounded bg-amber-100 text-amber-800 text-xs font-bold">{item.quantity}</span>
+                      <span>{item.product?.name ?? 'Producto'}</span>
+                      {item.notes && <span className="text-xs text-muted-foreground">({item.notes})</span>}
+                    </div>
+                    <span className="font-semibold">{formatEUR(item.subtotal)}</span>
+                  </div>
+                ))}
+              </div>
+
+              <Separator />
+
+              {/* Totals */}
+              <div className="flex justify-between font-bold">
+                <span>Total</span>
+                <span>{formatEUR(selectedOrder.total)}</span>
+              </div>
+
+              {/* Client info */}
+              {selectedOrder.client && (
+                <div className="text-sm text-muted-foreground">
+                  <UserCircle className="size-4 inline mr-1" />
+                  {selectedOrder.client.name} {selectedOrder.client.phone && `· ${selectedOrder.client.phone}`}
+                </div>
+              )}
+
+              {/* Notes */}
+              {selectedOrder.notes && (
+                <div className="text-sm">
+                  <span className="text-muted-foreground">Notas: </span>
+                  {selectedOrder.notes}
+                </div>
+              )}
+
+              {/* Status change buttons */}
+              {canUpdate && selectedOrder.status !== 'paid' && selectedOrder.status !== 'cancelled' && (
+                <div className="flex gap-2 flex-wrap">
+                  {getNextStatus(selectedOrder.status) && (
+                    <Button
+                      className="bg-amber-600 hover:bg-amber-700 text-white"
+                      onClick={() => {
+                        const next = getNextStatus(selectedOrder.status)
+                        if (next) handleStatusChange(selectedOrder.id, next)
+                        setShowDetailDialog(false)
+                      }}
+                    >
+                      Marcar como {orderStatusConfig[getNextStatus(selectedOrder.status)!]?.label}
+                    </Button>
+                  )}
+                  {selectedOrder.status !== 'cancelled' && (
+                    <Button
+                      variant="destructive"
+                      onClick={() => {
+                        handleStatusChange(selectedOrder.id, 'cancelled')
+                        setShowDetailDialog(false)
+                      }}
+                    >
+                      Cancelar pedido
+                    </Button>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+    </div>
+  )
+}
+
+// ─── CLIENTS TAB ────────────────────────────────────────────────────────────
+
+function ClientsTab({ overrideRestaurantId }: { overrideRestaurantId?: string } = {}) {
+  const { authHeaders, handleFetchResponse, currentUser } = useAuth()
+  const [clients, setClients] = useState<Client[]>([])
+  const [loading, setLoading] = useState(true)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [showCreateDialog, setShowCreateDialog] = useState(false)
+  const [showEditDialog, setShowEditDialog] = useState(false)
+  const [editingClient, setEditingClient] = useState<Client | null>(null)
+
+  // Create form
+  const [formName, setFormName] = useState('')
+  const [formPhone, setFormPhone] = useState('')
+  const [formEmail, setFormEmail] = useState('')
+  const [formNotes, setFormNotes] = useState('')
+  const [creating, setCreating] = useState(false)
+
+  // Edit form
+  const [editName, setEditName] = useState('')
+  const [editPhone, setEditPhone] = useState('')
+  const [editEmail, setEditEmail] = useState('')
+  const [editNotes, setEditNotes] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  const canCreate = currentUser && clientHasPermission(currentUser.role, 'clients:create')
+  const canUpdate = currentUser && clientHasPermission(currentUser.role, 'clients:update')
+  const canDelete = currentUser && clientHasPermission(currentUser.role, 'clients:delete')
+
+  const fetchClients = useCallback(async () => {
+    try {
+      const url = searchQuery ? `/api/clients?search=${encodeURIComponent(searchQuery)}` : '/api/clients'
+      const headers = authHeaders(false)
+      if (overrideRestaurantId) headers['X-Restaurant-Id'] = overrideRestaurantId
+      const res = await fetch(url, { headers })
+      if (handleFetchResponse(res) && res.ok) {
+        const json = await res.json()
+        setClients(json.clients)
+      }
+    } catch { /* silently fail */ } finally {
+      setLoading(false)
+    }
+  }, [authHeaders, handleFetchResponse, searchQuery, overrideRestaurantId])
+
+  useEffect(() => {
+    fetchClients()
+  }, [fetchClients])
+
+  const handleCreateClient = async () => {
+    if (!formName || !formPhone) {
+      toast.error('Nombre y teléfono son obligatorios')
+      return
+    }
+    setCreating(true)
+    try {
+      const headers = authHeaders()
+      if (overrideRestaurantId) headers['X-Restaurant-Id'] = overrideRestaurantId
+      const res = await fetch('/api/clients', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ name: formName, phone: formPhone, email: formEmail, notes: formNotes }),
+      })
+      if (handleFetchResponse(res) && res.ok) {
+        toast.success('Cliente creado')
+        setShowCreateDialog(false)
+        setFormName('')
+        setFormPhone('')
+        setFormEmail('')
+        setFormNotes('')
+        fetchClients()
+      } else {
+        const err = await res.json()
+        toast.error(err.error || 'Error al crear cliente')
+      }
+    } catch {
+      toast.error('Error de red')
+    } finally {
+      setCreating(false)
+    }
+  }
+
+  const handleEditClient = async () => {
+    if (!editingClient) return
+    setSaving(true)
+    try {
+      const headers = authHeaders()
+      if (overrideRestaurantId) headers['X-Restaurant-Id'] = overrideRestaurantId
+      const res = await fetch(`/api/clients/${editingClient.id}`, {
+        method: 'PUT',
+        headers,
+        body: JSON.stringify({ name: editName, phone: editPhone, email: editEmail, notes: editNotes }),
+      })
+      if (handleFetchResponse(res) && res.ok) {
+        toast.success('Cliente actualizado')
+        setShowEditDialog(false)
+        setEditingClient(null)
+        fetchClients()
+      } else {
+        const err = await res.json()
+        toast.error(err.error || 'Error al actualizar cliente')
+      }
+    } catch {
+      toast.error('Error de red')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleDeleteClient = async (client: Client) => {
+    try {
+      const headers = authHeaders()
+      if (overrideRestaurantId) headers['X-Restaurant-Id'] = overrideRestaurantId
+      const res = await fetch(`/api/clients/${client.id}`, {
+        method: 'DELETE',
+        headers,
+      })
+      if (handleFetchResponse(res) && res.ok) {
+        toast.success('Cliente eliminado')
+        fetchClients()
+      } else {
+        const err = await res.json()
+        toast.error(err.error || 'Error al eliminar cliente')
+      }
+    } catch {
+      toast.error('Error de red')
+    }
+  }
+
+  const openEditDialog = (client: Client) => {
+    setEditingClient(client)
+    setEditName(client.name)
+    setEditPhone(client.phone)
+    setEditEmail(client.email || '')
+    setEditNotes(client.notes || '')
+    setShowEditDialog(true)
+  }
+
+  if (loading) {
+    return (
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {Array.from({ length: 6 }).map((_, i) => (
+          <Skeleton key={i} className="h-28 rounded-xl" />
+        ))}
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <h2 className="text-2xl font-bold tracking-tight">Clientes</h2>
+        <div className="flex items-center gap-2">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              placeholder="Buscar por nombre o teléfono..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="pl-9 h-9 w-56"
+            />
+          </div>
+          {canCreate && (
+            <Button size="sm" className="h-9 bg-amber-600 hover:bg-amber-700 text-white" onClick={() => setShowCreateDialog(true)}>
+              <Plus className="size-4 mr-1" />
+              Nuevo
+            </Button>
+          )}
+        </div>
+      </div>
+
+      {/* Clients list */}
+      {clients.length === 0 ? (
+        <Card className="rounded-xl">
+          <CardContent className="p-6 text-center text-muted-foreground">
+            No se encontraron clientes
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {clients.map((client) => (
+            <Card key={client.id} className="rounded-xl">
+              <CardContent className="p-4">
+                <div className="flex items-start justify-between mb-2">
+                  <div>
+                    <p className="font-bold text-base">{client.name}</p>
+                    <div className="flex items-center gap-2 mt-0.5">
+                      {client.phone && (
+                        <span className="text-xs text-muted-foreground flex items-center gap-1">
+                          <Phone className="size-3" />{client.phone}
+                        </span>
+                      )}
+                    </div>
+                    {client.email && (
+                      <span className="text-xs text-muted-foreground">{client.email}</span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-0.5">
+                    {canUpdate && (
+                      <Button variant="ghost" size="sm" className="size-8 p-0" onClick={() => openEditDialog(client)}>
+                        <Pencil className="size-3.5 text-muted-foreground" />
+                      </Button>
+                    )}
+                    {canDelete && (
+                      <Button variant="ghost" size="sm" className="size-8 p-0" onClick={() => handleDeleteClient(client)}>
+                        <Trash2 className="size-3.5 text-red-400" />
+                      </Button>
+                    )}
+                  </div>
+                </div>
+                <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                  <span className="flex items-center gap-1"><Star className="size-3" />{client.points} pts</span>
+                  <span className="flex items-center gap-1"><UserCircle className="size-3" />{client.visits} visitas</span>
+                  {client._count && <span className="flex items-center gap-1"><Receipt className="size-3" />{client._count.orders} pedidos</span>}
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
+
+      {/* Create Client Dialog */}
+      <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Nuevo cliente</DialogTitle>
+            <DialogDescription>Añade un nuevo cliente al restaurante</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>Nombre *</Label>
+              <Input value={formName} onChange={(e) => setFormName(e.target.value)} placeholder="María López" />
+            </div>
+            <div className="space-y-2">
+              <Label>Teléfono *</Label>
+              <Input value={formPhone} onChange={(e) => setFormPhone(e.target.value)} placeholder="612345678" />
+            </div>
+            <div className="space-y-2">
+              <Label>Email</Label>
+              <Input type="email" value={formEmail} onChange={(e) => setFormEmail(e.target.value)} placeholder="maria@email.com" />
+            </div>
+            <div className="space-y-2">
+              <Label>Notas</Label>
+              <Textarea value={formNotes} onChange={(e) => setFormNotes(e.target.value)} placeholder="Alergias, preferencias..." />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowCreateDialog(false)}>Cancelar</Button>
+            <Button className="bg-amber-600 hover:bg-amber-700 text-white" onClick={handleCreateClient} disabled={creating}>
+              {creating ? 'Creando...' : 'Crear cliente'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Client Dialog */}
+      <Dialog open={showEditDialog} onOpenChange={setShowEditDialog}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Editar cliente</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>Nombre</Label>
+              <Input value={editName} onChange={(e) => setEditName(e.target.value)} />
+            </div>
+            <div className="space-y-2">
+              <Label>Teléfono</Label>
+              <Input value={editPhone} onChange={(e) => setEditPhone(e.target.value)} />
+            </div>
+            <div className="space-y-2">
+              <Label>Email</Label>
+              <Input type="email" value={editEmail} onChange={(e) => setEditEmail(e.target.value)} />
+            </div>
+            <div className="space-y-2">
+              <Label>Notas</Label>
+              <Textarea value={editNotes} onChange={(e) => setEditNotes(e.target.value)} />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowEditDialog(false)}>Cancelar</Button>
+            <Button className="bg-amber-600 hover:bg-amber-700 text-white" onClick={handleEditClient} disabled={saving}>
+              {saving ? 'Guardando...' : 'Guardar'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
@@ -3028,13 +4671,39 @@ export default function RestaurantPage() {
     { id: 'caja' as TabId, label: 'Caja', icon: <CreditCard className="size-4" /> },
   ]
 
+  // Filter main tabs by permissions
+  const visibleMainTabs = mainTabs.filter((tab) => {
+    if (!currentUser) return false
+    switch (tab.id) {
+      case 'camarero': return clientHasPermission(currentUser.role, 'orders:create')
+      case 'cocina': return clientHasPermission(currentUser.role, 'orders:update')
+      case 'caja': return clientHasPermission(currentUser.role, 'orders:pay') || clientHasPermission(currentUser.role, 'cash:read')
+      default: return true
+    }
+  })
+
   const adminTabs = [
     { id: 'dashboard' as TabId, label: 'Dashboard', icon: <LayoutDashboard className="size-4" /> },
-    { id: 'products' as TabId, label: 'Productos', icon: <Package className="size-4" /> },
+    { id: 'users' as TabId, label: 'Usuarios', icon: <Users className="size-4" /> },
     { id: 'tables' as TabId, label: 'Mesas', icon: <UtensilsCrossed className="size-4" /> },
+    { id: 'products' as TabId, label: 'Productos', icon: <Package className="size-4" /> },
     { id: 'orders' as TabId, label: 'Pedidos', icon: <Receipt className="size-4" /> },
-    { id: 'clients' as TabId, label: 'Clientes', icon: <Users className="size-4" /> },
+    { id: 'clients' as TabId, label: 'Clientes', icon: <UserCircle className="size-4" /> },
   ]
+
+  // Filter admin tabs by permissions
+  const visibleAdminTabs = adminTabs.filter((tab) => {
+    if (!currentUser) return false
+    switch (tab.id) {
+      case 'dashboard': return clientHasPermission(currentUser.role, 'dashboard:read')
+      case 'users': return clientHasPermission(currentUser.role, 'users:read')
+      case 'tables': return clientHasPermission(currentUser.role, 'tables:read')
+      case 'products': return clientHasPermission(currentUser.role, 'products:read')
+      case 'orders': return clientHasPermission(currentUser.role, 'orders:read')
+      case 'clients': return clientHasPermission(currentUser.role, 'clients:read')
+      default: return true
+    }
+  })
 
   // Roles that can access the reportes tab
   const canAccessReportes = currentUser && ['super_admin', 'admin', 'encargado'].includes(currentUser.role)
@@ -3222,7 +4891,7 @@ export default function RestaurantPage() {
               {/* Main tabs */}
               <div className="mb-4">
                 <TabsList className="h-12 bg-amber-100/60 p-1">
-                  {mainTabs.map((tab) => (
+                  {visibleMainTabs.map((tab) => (
                     <TabsTrigger
                       key={tab.id}
                       value={tab.id}
@@ -3248,10 +4917,11 @@ export default function RestaurantPage() {
               </TabsContent>
 
               {/* Admin tabs - small secondary row */}
+              {visibleAdminTabs.length > 0 && (
               <div className="mt-6 pt-4 border-t">
                 <p className="text-xs text-muted-foreground mb-2 uppercase tracking-wider">Administración</p>
                 <TabsList className="h-9 bg-muted p-0.5">
-                  {adminTabs.map((tab) => (
+                  {visibleAdminTabs.map((tab) => (
                     <TabsTrigger
                       key={tab.id}
                       value={tab.id}
@@ -3272,9 +4942,14 @@ export default function RestaurantPage() {
                   )}
                 </TabsList>
               </div>
+              )}
 
               <TabsContent value="dashboard" className="mt-2">
-                <AdminStub title="Dashboard" icon={<LayoutDashboard className="size-12" />} />
+                <DashboardTab />
+              </TabsContent>
+
+              <TabsContent value="users" className="mt-2">
+                <UsersTab />
               </TabsContent>
 
               <TabsContent value="products" className="mt-2">
@@ -3282,15 +4957,15 @@ export default function RestaurantPage() {
               </TabsContent>
 
               <TabsContent value="tables" className="mt-2">
-                <AdminStub title="Mesas" icon={<UtensilsCrossed className="size-12" />} />
+                <TablesTab />
               </TabsContent>
 
               <TabsContent value="orders" className="mt-2">
-                <AdminStub title="Pedidos" icon={<Receipt className="size-12" />} />
+                <OrdersTab />
               </TabsContent>
 
               <TabsContent value="clients" className="mt-2">
-                <AdminStub title="Clientes" icon={<Users className="size-12" />} />
+                <ClientsTab />
               </TabsContent>
 
               <TabsContent value="reportes" className="mt-2">

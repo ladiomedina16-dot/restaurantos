@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 
-export type TabId = 'camarero' | 'cocina' | 'caja' | 'dashboard' | 'products' | 'tables' | 'orders' | 'clients' | 'reportes' | 'restaurantes'
+export type TabId = 'camarero' | 'cocina' | 'caja' | 'dashboard' | 'products' | 'tables' | 'orders' | 'clients' | 'reportes' | 'restaurantes' | 'users'
 
 export interface Notification {
   id: string
