@@ -236,11 +236,22 @@ interface DashboardData {
   stats: {
     totalOrdersToday: number
     revenueToday: number
+    totalCash: number
+    totalCard: number
+    totalSuppliers: number
+    netTotal: number
     occupiedTables: number
     totalActiveTables: number
     totalActiveProducts: number
     lowStockCount: number
   }
+  cashSession: {
+    id: string
+    openedAt: string
+    openingCash: number
+    openedBy: { id: string; username: string; name: string; role: string }
+  } | null
+  cashSessionOpen: boolean
   topProducts: { productId: string; name: string; totalQuantity: number; totalRevenue: number }[]
   lowStockProducts: { id: string; name: string; stock: number; category: string }[]
   recentOrders: Order[]
@@ -3220,16 +3231,22 @@ function SuperAdminPanel() {
       })
       if (!handleFetchResponse(res)) return
       if (res.ok) {
-        toast.success('Restaurante eliminado')
+        const json = await res.json()
+        toast.success(json.message || 'Restaurante eliminado')
         setDeleteTarget(null)
         setLoading(true)
         fetchRestaurants()
       } else {
-        const err = await res.json()
-        toast.error(err.error || 'Error al eliminar restaurante')
+        let errorMsg = 'Error al eliminar restaurante'
+        try {
+          const err = await res.json()
+          errorMsg = err.error || err.details || errorMsg
+        } catch { /* response body not JSON */ }
+        toast.error(errorMsg)
       }
-    } catch {
-      toast.error('Error de red')
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Error de conexión'
+      toast.error(message)
     } finally {
       setDeleteLoading(false)
     }
@@ -3605,7 +3622,7 @@ function DashboardTab({ overrideRestaurantId }: { overrideRestaurantId?: string 
     )
   }
 
-  const { stats, topProducts, lowStockProducts, recentOrders, ordersByStatus } = data
+  const { stats, topProducts, lowStockProducts, recentOrders, ordersByStatus, cashSessionOpen, cashSession } = data
 
   return (
     <div className="space-y-6">
@@ -3617,13 +3634,44 @@ function DashboardTab({ overrideRestaurantId }: { overrideRestaurantId?: string 
         </Button>
       </div>
 
-      {/* Stats Cards */}
+      {/* Cash Session Banner */}
+      {!cashSessionOpen && (
+        <Card className="rounded-xl border-amber-300 bg-amber-50">
+          <CardContent className="p-4 flex items-center gap-3">
+            <div className="flex size-10 items-center justify-center rounded-full bg-amber-200">
+              <Lock className="size-5 text-amber-700" />
+            </div>
+            <div>
+              <p className="font-semibold text-amber-900">No hay caja abierta</p>
+              <p className="text-sm text-amber-700">Abre una sesión de caja para ver las ventas activas. Los datos históricos están en Reportes.</p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {cashSessionOpen && cashSession && (
+        <Card className="rounded-xl border-green-300 bg-green-50">
+          <CardContent className="p-4 flex items-center gap-3">
+            <div className="flex size-10 items-center justify-center rounded-full bg-green-200">
+              <CheckCircle className="size-5 text-green-700" />
+            </div>
+            <div className="flex-1">
+              <p className="font-semibold text-green-900">Caja abierta</p>
+              <p className="text-sm text-green-700">
+                Abierta por {cashSession.openedBy?.name || cashSession.openedBy?.username || '?'} · {timeAgo(cashSession.openedAt)} · Fondo: {formatEUR(cashSession.openingCash)}
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Financial Stats Cards - from cash session */}
       <div className="grid gap-4 grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
         <Card className="rounded-xl">
           <CardContent className="p-4">
             <div className="flex items-center gap-2 text-muted-foreground mb-1">
               <Receipt className="size-4" />
-              <span className="text-xs font-medium">Pedidos hoy</span>
+              <span className="text-xs font-medium">Cobros sesión</span>
             </div>
             <p className="text-2xl font-bold">{stats.totalOrdersToday}</p>
           </CardContent>
@@ -3632,11 +3680,51 @@ function DashboardTab({ overrideRestaurantId }: { overrideRestaurantId?: string 
           <CardContent className="p-4">
             <div className="flex items-center gap-2 text-muted-foreground mb-1">
               <Euro className="size-4" />
-              <span className="text-xs font-medium">Ingresos hoy</span>
+              <span className="text-xs font-medium">Ventas sesión</span>
             </div>
-            <p className="text-2xl font-bold text-green-700">{formatEUR(stats.revenueToday)}</p>
+            <p className="text-2xl font-bold text-green-700">{cashSessionOpen ? formatEUR(stats.revenueToday) : '—'}</p>
           </CardContent>
         </Card>
+        <Card className="rounded-xl">
+          <CardContent className="p-4">
+            <div className="flex items-center gap-2 text-muted-foreground mb-1">
+              <Euro className="size-4" />
+              <span className="text-xs font-medium">Efectivo</span>
+            </div>
+            <p className="text-2xl font-bold text-emerald-700">{cashSessionOpen ? formatEUR(stats.totalCash) : '—'}</p>
+          </CardContent>
+        </Card>
+        <Card className="rounded-xl">
+          <CardContent className="p-4">
+            <div className="flex items-center gap-2 text-muted-foreground mb-1">
+              <CreditCard className="size-4" />
+              <span className="text-xs font-medium">Tarjeta</span>
+            </div>
+            <p className="text-2xl font-bold text-blue-700">{cashSessionOpen ? formatEUR(stats.totalCard) : '—'}</p>
+          </CardContent>
+        </Card>
+        <Card className="rounded-xl">
+          <CardContent className="p-4">
+            <div className="flex items-center gap-2 text-muted-foreground mb-1">
+              <ShoppingCart className="size-4" />
+              <span className="text-xs font-medium">Proveedores</span>
+            </div>
+            <p className="text-2xl font-bold text-orange-700">{cashSessionOpen ? formatEUR(stats.totalSuppliers) : '—'}</p>
+          </CardContent>
+        </Card>
+        <Card className="rounded-xl">
+          <CardContent className="p-4">
+            <div className="flex items-center gap-2 text-muted-foreground mb-1">
+              <BarChart3 className="size-4" />
+              <span className="text-xs font-medium">Neto sesión</span>
+            </div>
+            <p className="text-2xl font-bold">{cashSessionOpen ? formatEUR(stats.netTotal) : '—'}</p>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Operational stats (always visible) */}
+      <div className="grid gap-4 grid-cols-2 lg:grid-cols-4">
         <Card className="rounded-xl">
           <CardContent className="p-4">
             <div className="flex items-center gap-2 text-muted-foreground mb-1">
@@ -3703,11 +3791,11 @@ function DashboardTab({ overrideRestaurantId }: { overrideRestaurantId?: string 
         {/* Top Products */}
         <Card className="rounded-xl">
           <CardHeader className="pb-3">
-            <CardTitle className="text-base">Top productos hoy</CardTitle>
+            <CardTitle className="text-base">{cashSessionOpen ? 'Top productos sesión' : 'Top productos'}</CardTitle>
           </CardHeader>
           <CardContent className="p-4 pt-0">
             {topProducts.length === 0 ? (
-              <p className="text-sm text-muted-foreground text-center py-4">Sin datos de ventas hoy</p>
+              <p className="text-sm text-muted-foreground text-center py-4">{cashSessionOpen ? 'Sin ventas en esta sesión' : 'Sin datos — abre caja para ver ventas'}</p>
             ) : (
               <div className="space-y-2">
                 {topProducts.map((product, idx) => (
@@ -3754,12 +3842,12 @@ function DashboardTab({ overrideRestaurantId }: { overrideRestaurantId?: string 
         {/* Recent Orders */}
         <Card className="rounded-xl">
           <CardHeader className="pb-3">
-            <CardTitle className="text-base">Últimos pedidos</CardTitle>
+            <CardTitle className="text-base">Pedidos activos</CardTitle>
           </CardHeader>
           <CardContent className="p-4 pt-0">
             <div className="space-y-2 max-h-64 overflow-y-auto">
               {recentOrders.length === 0 ? (
-                <p className="text-sm text-muted-foreground text-center py-4">No hay pedidos</p>
+                <p className="text-sm text-muted-foreground text-center py-4">No hay pedidos activos</p>
               ) : (
                 recentOrders.map((order) => {
                   const cfg = orderStatusConfig[order.status]

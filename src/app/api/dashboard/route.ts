@@ -1,7 +1,7 @@
 // ============================================================
 // /api/dashboard — Dashboard analytics
 // GET /api/dashboard → Dashboard data (requires dashboard:read)
-// Now filters by restaurantId for multi-tenant isolation
+// Now uses open cash session instead of calendar day
 // ============================================================
 
 import { db } from '@/lib/db'
@@ -18,36 +18,56 @@ export async function GET(request: Request) {
     if ('error' in scope) return scope.error
     const { restaurantId } = scope
 
-    // Get today's date range
-    const now = new Date()
-    const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate())
-    const endOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1)
-
-    // Total orders today
-    const totalOrdersToday = await db.order.count({
-      where: {
-        restaurantId,
-        createdAt: {
-          gte: startOfDay,
-          lt: endOfDay,
+    // ─── Check for open cash session ─────────────────────────
+    const openSession = await db.cashSession.findFirst({
+      where: { restaurantId, status: 'open' },
+      include: {
+        openedBy: {
+          select: { id: true, username: true, name: true, role: true },
+        },
+        payments: {
+          include: {
+            order: {
+              select: { id: true, status: true, total: true },
+            },
+          },
+          orderBy: { createdAt: 'desc' },
+        },
+        supplierPayments: {
+          include: {
+            user: {
+              select: { id: true, username: true, name: true },
+            },
+          },
+          orderBy: { createdAt: 'desc' },
         },
       },
+      orderBy: { openedAt: 'desc' },
     })
 
-    // Revenue today (sum of totals for paid/completed orders)
-    const todayOrders = await db.order.findMany({
-      where: {
-        restaurantId,
-        createdAt: {
-          gte: startOfDay,
-          lt: endOfDay,
-        },
-        status: { notIn: ['cancelled'] },
-      },
-      select: { total: true },
-    })
+    const cashSessionOpen = !!openSession
 
-    const revenueToday = todayOrders.reduce((sum, order) => sum + order.total, 0)
+    // ─── Financial stats from open cash session ──────────────
+    let sessionTotalSales = 0
+    let sessionTotalCash = 0
+    let sessionTotalCard = 0
+    let sessionTotalSuppliers = 0
+    let sessionOrderCount = 0
+
+    if (openSession) {
+      sessionTotalSales = openSession.payments.reduce((sum, p) => sum + p.amount, 0)
+      sessionTotalCash = openSession.payments
+        .filter((p) => p.method === 'efectivo')
+        .reduce((sum, p) => sum + p.amount, 0)
+      sessionTotalCard = openSession.payments
+        .filter((p) => p.method === 'tarjeta')
+        .reduce((sum, p) => sum + p.amount, 0)
+      sessionTotalSuppliers = openSession.supplierPayments
+        .reduce((sum, sp) => sum + sp.amount, 0)
+      sessionOrderCount = openSession.payments.length
+    }
+
+    // ─── Non-financial stats (always available) ──────────────
 
     // Occupied tables count
     const occupiedTables = await db.table.count({
@@ -74,49 +94,51 @@ export async function GET(request: Request) {
       take: 10,
     })
 
-    // Top products (by quantity sold today)
-    const topProducts = await db.orderItem.groupBy({
-      by: ['productId'],
-      where: {
-        order: {
-          restaurantId,
-          createdAt: {
-            gte: startOfDay,
-            lt: endOfDay,
+    // Top products (from open session payments only, or from today if no session)
+    let topProducts: { productId: string; name: string; totalQuantity: number; totalRevenue: number }[] = []
+
+    if (openSession) {
+      const sessionOrderIds = openSession.payments.map((p) => p.orderId)
+      if (sessionOrderIds.length > 0) {
+        const topProductsRaw = await db.orderItem.groupBy({
+          by: ['productId'],
+          where: {
+            orderId: { in: sessionOrderIds },
           },
-          status: { notIn: ['cancelled'] },
-        },
-      },
-      _sum: {
-        quantity: true,
-        subtotal: true,
-      },
-      orderBy: {
-        _sum: {
-          quantity: 'desc',
-        },
-      },
-      take: 5,
-    })
-
-    // Enrich top products with product details
-    const enrichedTopProducts = await Promise.all(
-      topProducts.map(async (item) => {
-        const product = await db.product.findUnique({
-          where: { id: item.productId },
+          _sum: {
+            quantity: true,
+            subtotal: true,
+          },
+          orderBy: {
+            _sum: {
+              quantity: 'desc',
+            },
+          },
+          take: 5,
         })
-        return {
-          productId: item.productId,
-          name: product?.name ?? 'Unknown',
-          totalQuantity: item._sum.quantity ?? 0,
-          totalRevenue: item._sum.subtotal ?? 0,
-        }
-      })
-    )
 
-    // Recent orders
+        topProducts = await Promise.all(
+          topProductsRaw.map(async (item) => {
+            const product = await db.product.findUnique({
+              where: { id: item.productId },
+            })
+            return {
+              productId: item.productId,
+              name: product?.name ?? 'Unknown',
+              totalQuantity: item._sum.quantity ?? 0,
+              totalRevenue: item._sum.subtotal ?? 0,
+            }
+          })
+        )
+      }
+    }
+
+    // Recent orders (last 10, active statuses)
     const recentOrders = await db.order.findMany({
-      where: { restaurantId },
+      where: {
+        restaurantId,
+        status: { notIn: ['paid', 'cancelled'] },
+      },
       take: 10,
       orderBy: { createdAt: 'desc' },
       include: {
@@ -128,7 +150,7 @@ export async function GET(request: Request) {
       },
     })
 
-    // Orders by status
+    // Orders by status (active orders only)
     const ordersByStatus = await db.order.groupBy({
       by: ['status'],
       _count: {
@@ -153,14 +175,27 @@ export async function GET(request: Request) {
 
     return Response.json({
       stats: {
-        totalOrdersToday,
-        revenueToday: Math.round(revenueToday * 100) / 100,
+        totalOrdersToday: sessionOrderCount,
+        revenueToday: Math.round(sessionTotalSales * 100) / 100,
+        totalCash: Math.round(sessionTotalCash * 100) / 100,
+        totalCard: Math.round(sessionTotalCard * 100) / 100,
+        totalSuppliers: Math.round(sessionTotalSuppliers * 100) / 100,
+        netTotal: Math.round((sessionTotalSales - sessionTotalSuppliers) * 100) / 100,
         occupiedTables,
         totalActiveTables,
         totalActiveProducts,
         lowStockCount: lowStockProducts.length,
       },
-      topProducts: enrichedTopProducts,
+      cashSession: openSession
+        ? {
+            id: openSession.id,
+            openedAt: openSession.openedAt,
+            openingCash: openSession.openingCash,
+            openedBy: openSession.openedBy,
+          }
+        : null,
+      cashSessionOpen,
+      topProducts,
       lowStockProducts,
       recentOrders,
       ordersByStatus: ordersByStatus.map((item) => ({

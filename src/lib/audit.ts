@@ -31,6 +31,7 @@ export type AuditAction =
   | 'password_reset'
   | 'onboarding_completed'
   | 'subscription_changed'
+  | 'restaurant_deleted'
   | 'supplier_payment_created'
 
 export type EntityType =
