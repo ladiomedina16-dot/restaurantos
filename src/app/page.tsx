@@ -1790,7 +1790,8 @@ export default function RestaurantPage() {
   // ─── Onboarding State ──────────────────────────────────────
   const [showOnboardingDialog, setShowOnboardingDialog] = useState(false)
   const [onboardingLoading, setOnboardingLoading] = useState(false)
-  const [onboardingForm, setOnboardingForm] = useState({ name: '', slug: '', address: '', phone: '', adminUsername: '', adminPassword: '', adminName: '' })
+  const [onboardingForm, setOnboardingForm] = useState({ restaurantName: '', slug: '', address: '', phone: '', adminName: '', adminUsername: '', adminPassword: '' })
+  const [onboardingErrors, setOnboardingErrors] = useState<Record<string, string>>({})
 
   // Load auth from localStorage on mount
   useEffect(() => {
@@ -2088,12 +2089,14 @@ export default function RestaurantPage() {
             </DialogHeader>
             <div className="space-y-4">
               <div className="space-y-2">
-                <Label>Nombre del restaurante</Label>
-                <Input value={onboardingForm.name} onChange={(e) => setOnboardingForm({ ...onboardingForm, name: e.target.value })} />
+                <Label>Nombre del restaurante *</Label>
+                <Input value={onboardingForm.restaurantName} onChange={(e) => { setOnboardingForm({ ...onboardingForm, restaurantName: e.target.value }); setOnboardingErrors({ ...onboardingErrors, restaurantName: '' }) }} placeholder="La Carta de Sevilla" />
+                {onboardingErrors.restaurantName && <p className="text-sm text-red-600">{onboardingErrors.restaurantName}</p>}
               </div>
               <div className="space-y-2">
-                <Label>Slug</Label>
-                <Input value={onboardingForm.slug} onChange={(e) => setOnboardingForm({ ...onboardingForm, slug: e.target.value })} placeholder="mi-restaurante" />
+                <Label>Slug *</Label>
+                <Input value={onboardingForm.slug} onChange={(e) => { setOnboardingForm({ ...onboardingForm, slug: e.target.value }); setOnboardingErrors({ ...onboardingErrors, slug: '' }) }} placeholder="mi-restaurante" />
+                {onboardingErrors.slug && <p className="text-sm text-red-600">{onboardingErrors.slug}</p>}
               </div>
               <div className="space-y-2">
                 <Label>Dirección</Label>
@@ -2106,35 +2109,63 @@ export default function RestaurantPage() {
               <Separator />
               <p className="font-semibold">Administrador</p>
               <div className="space-y-2">
-                <Label>Nombre</Label>
-                <Input value={onboardingForm.adminName} onChange={(e) => setOnboardingForm({ ...onboardingForm, adminName: e.target.value })} />
+                <Label>Nombre *</Label>
+                <Input value={onboardingForm.adminName} onChange={(e) => { setOnboardingForm({ ...onboardingForm, adminName: e.target.value }); setOnboardingErrors({ ...onboardingErrors, adminName: '' }) }} placeholder="Antonio Reyes" />
+                {onboardingErrors.adminName && <p className="text-sm text-red-600">{onboardingErrors.adminName}</p>}
               </div>
               <div className="space-y-2">
-                <Label>Usuario</Label>
-                <Input value={onboardingForm.adminUsername} onChange={(e) => setOnboardingForm({ ...onboardingForm, adminUsername: e.target.value })} />
+                <Label>Usuario *</Label>
+                <Input value={onboardingForm.adminUsername} onChange={(e) => { setOnboardingForm({ ...onboardingForm, adminUsername: e.target.value }); setOnboardingErrors({ ...onboardingErrors, adminUsername: '' }) }} placeholder="admin" />
+                {onboardingErrors.adminUsername && <p className="text-sm text-red-600">{onboardingErrors.adminUsername}</p>}
               </div>
               <div className="space-y-2">
-                <Label>Contraseña</Label>
-                <Input type="password" value={onboardingForm.adminPassword} onChange={(e) => setOnboardingForm({ ...onboardingForm, adminPassword: e.target.value })} />
+                <Label>Contraseña *</Label>
+                <Input type="password" value={onboardingForm.adminPassword} onChange={(e) => { setOnboardingForm({ ...onboardingForm, adminPassword: e.target.value }); setOnboardingErrors({ ...onboardingErrors, adminPassword: '' }) }} placeholder="Mínimo 6 caracteres" />
+                {onboardingErrors.adminPassword && <p className="text-sm text-red-600">{onboardingErrors.adminPassword}</p>}
               </div>
             </div>
             <DialogFooter>
               <Button variant="outline" onClick={() => setShowOnboardingDialog(false)}>Cancelar</Button>
               <Button
                 className="bg-amber-600 hover:bg-amber-700 text-white"
-                disabled={onboardingLoading || !onboardingForm.name || !onboardingForm.slug || !onboardingForm.adminUsername || !onboardingForm.adminPassword}
+                disabled={onboardingLoading}
                 onClick={async () => {
+                  // Client-side validation before calling API
+                  const errors: Record<string, string> = {}
+                  if (!onboardingForm.restaurantName.trim()) errors.restaurantName = 'El nombre del restaurante es obligatorio'
+                  if (!onboardingForm.slug.trim()) errors.slug = 'El slug es obligatorio'
+                  else if (!/^[a-z0-9-]+$/.test(onboardingForm.slug)) errors.slug = 'Solo minúsculas, números y guiones'
+                  if (!onboardingForm.adminName.trim()) errors.adminName = 'El nombre del administrador es obligatorio'
+                  if (!onboardingForm.adminUsername.trim()) errors.adminUsername = 'El usuario es obligatorio'
+                  else if (onboardingForm.adminUsername.trim().length < 3) errors.adminUsername = 'Mínimo 3 caracteres'
+                  if (!onboardingForm.adminPassword) errors.adminPassword = 'La contraseña es obligatoria'
+                  else if (onboardingForm.adminPassword.length < 6) errors.adminPassword = 'Mínimo 6 caracteres'
+
+                  if (Object.keys(errors).length > 0) {
+                    setOnboardingErrors(errors)
+                    return
+                  }
+
                   setOnboardingLoading(true)
                   try {
                     const res = await fetch('/api/onboarding', {
                       method: 'POST',
                       headers: authHeaders(),
-                      body: JSON.stringify(onboardingForm),
+                      body: JSON.stringify({
+                        restaurantName: onboardingForm.restaurantName,
+                        slug: onboardingForm.slug,
+                        address: onboardingForm.address,
+                        phone: onboardingForm.phone,
+                        adminName: onboardingForm.adminName,
+                        adminUsername: onboardingForm.adminUsername,
+                        adminPassword: onboardingForm.adminPassword,
+                      }),
                     })
                     if (res.ok) {
                       toast.success('Restaurante y admin creados correctamente')
                       setShowOnboardingDialog(false)
-                      setOnboardingForm({ name: '', slug: '', address: '', phone: '', adminUsername: '', adminPassword: '', adminName: '' })
+                      setOnboardingForm({ restaurantName: '', slug: '', address: '', phone: '', adminName: '', adminUsername: '', adminPassword: '' })
+                      setOnboardingErrors({})
                     } else {
                       const err = await res.json()
                       toast.error(err.error || 'Error al crear restaurante')
