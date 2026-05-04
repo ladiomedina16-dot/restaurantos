@@ -1,32 +1,6 @@
 // Load .env BEFORE any other imports (ESM hoisting safe)
 import 'dotenv/config'
 
-// Fix: System env may have a stale SQLite DATABASE_URL from initial setup.
-// If the URL starts with "file:", override it with the PostgreSQL URL from .env.
-// dotenv doesn't override existing env vars, so we do it manually.
-import { readFileSync } from 'fs'
-import { resolve } from 'path'
-
-if (process.env.DATABASE_URL?.startsWith('file:')) {
-  try {
-    const envContent = readFileSync(resolve(process.cwd(), '.env'), 'utf8')
-    const pgUrlMatch = envContent.match(/^DATABASE_URL="?(postgresql:\/\/[^"\n]+)"?/m)
-    if (pgUrlMatch) {
-      process.env.DATABASE_URL = pgUrlMatch[1]
-      console.log('📋 Overrode SQLite DATABASE_URL with PostgreSQL from .env')
-    }
-  } catch { /* ignore */ }
-}
-if (process.env.DIRECT_URL?.startsWith('file:')) {
-  try {
-    const envContent = readFileSync(resolve(process.cwd(), '.env'), 'utf8')
-    const pgUrlMatch = envContent.match(/^DIRECT_URL="?(postgresql:\/\/[^"\n]+)"?/m)
-    if (pgUrlMatch) {
-      process.env.DIRECT_URL = pgUrlMatch[1]
-    }
-  } catch { /* ignore */ }
-}
-
 import { db } from '../src/lib/db'
 import bcrypt from 'bcryptjs'
 
@@ -68,10 +42,12 @@ async function seed() {
   // ═══════════════════════════════════════════════════════════
   // USUARIOS
   // ═══════════════════════════════════════════════════════════
-  // ── Passwords ──────────────────────────────────────────────
-  const PW_SUPER  = 'Super2024!'   // super_admin
-  const PW_ADMIN  = 'Admin2024!'   // admin del restaurante
-  const PW_STAFF  = 'Sevilla2024!' // resto del personal
+  // ⚠️  All users are created with mustChangePassword: true
+  // They MUST change their password on first login.
+  // Passwords are NOT printed to console for security.
+  const PW_SUPER  = 'Super2024!'
+  const PW_ADMIN  = 'Admin2024!'
+  const PW_STAFF  = 'Sevilla2024!'
 
   const userDefs = [
     // super_admin: acceso total, sin restaurante (ve todo)
@@ -81,7 +57,7 @@ async function seed() {
       name: 'Super Administrador',
       role: 'super_admin',
       active: true,
-      mustChangePassword: true, // ⚠️ Must change on first login
+      mustChangePassword: true,
       zone: null,
       restaurantId: null,
     },
@@ -96,7 +72,6 @@ async function seed() {
       zone: null,
       restaurantId: r1,
     },
-    // ── Personal creado por el admin ────────────────────────
     // Camareros con zona asignada
     {
       username: 'camarero_terraza',
@@ -139,7 +114,7 @@ async function seed() {
       zone: null,
       restaurantId: r1,
     },
-    // Encargado: reportes, caja, usuarios, auditoría
+    // Encargado
     {
       username: 'encargado',
       passwordHash: hash(PW_STAFF),
@@ -236,7 +211,6 @@ async function seed() {
     { name: 'Ración de Pescaíto Frito', description: 'Variado de pescaíto frito: chanquetes, boquerones, salmonetes', price: 12.00, category: 'racion', stock: 15 },
     { name: 'Ración de Gambas al Ajillo', description: 'Gambas en aceite de oliva con ajo laminado y guindilla', price: 11.00, category: 'racion', stock: 18 },
     { name: 'Ración de Solomillo al Whisky', description: 'Solomillo de cerdo flambéado al whisky con patatas', price: 14.00, category: 'racion', stock: 15 },
-    // ★ PLATOS ESPECIALES ★
     { name: 'Arroz Meloso de Carrillada Ibérica', description: '★ ESPECIAL ★ Arroz meloso con carrillada ibérica deshecha y reducción de su jugo', price: 16.00, category: 'racion', stock: 12 },
     { name: 'Presa Ibérica con Salsa de Vino Oloroso', description: '★ ESPECIAL ★ Presa ibérica a la brasa con salsa de vino oloroso y patatas panaderas', price: 18.00, category: 'racion', stock: 10 },
   ]
@@ -326,23 +300,25 @@ async function seed() {
   // RESUMEN FINAL
   // ═══════════════════════════════════════════════════════════
   console.log('\n' + '═'.repeat(60))
-  console.log('🎉  SEED COMPLETADO — DATOS REALES DE RESTAURANTOS')
+  console.log('🎉  SEED COMPLETADO — RestaurantOS')
   console.log('═'.repeat(60))
   console.log(`\n  📍 Restaurante: ${restaurant.name}`)
   console.log(`     ${restaurant.address}`)
   console.log(`     Tel: ${restaurant.phone}\n`)
-  console.log('  🔑 CREDENCIALES DE ACCESO:')
+  console.log('  🔑 USUARIOS CREADOS (deben cambiar contraseña en el primer login):')
   console.log('  ─────────────────────────────────────────────')
-  console.log(`  👑 super_admin   │ user: superadmin        │ pass: ${PW_SUPER}`)
-  console.log(`  🏢 admin         │ user: admin             │ pass: ${PW_ADMIN}`)
-  console.log(`  🍽️  camarero_terraza │ user: camarero_terraza │ pass: ${PW_STAFF}`)
-  console.log(`  🍽️  camarero_sala   │ user: camarero_sala    │ pass: ${PW_STAFF}`)
-  console.log(`  🍽️  camarero_barra  │ user: camarero_barra   │ pass: ${PW_STAFF}`)
-  console.log(`  👨‍🍳 cocinero      │ user: cocinero          │ pass: ${PW_STAFF}`)
-  console.log(`  📊 encargado     │ user: encargado          │ pass: ${PW_STAFF}`)
-  console.log(`  💰 caja          │ user: caja               │ pass: ${PW_STAFF}`)
+  console.log('  👑 super_admin      │ user: superadmin')
+  console.log('  🏢 admin            │ user: admin')
+  console.log('  🍽️  camarero_terraza │ user: camarero_terraza')
+  console.log('  🍽️  camarero_sala    │ user: camarero_sala')
+  console.log('  🍽️  camarero_barra   │ user: camarero_barra')
+  console.log('  👨‍🍳 cocinero          │ user: cocinero')
+  console.log('  📊 encargado         │ user: encargado')
+  console.log('  💰 caja              │ user: caja')
   console.log('  ─────────────────────────────────────────────')
-  console.log('\n  ⚠️  TODOS los usuarios deben cambiar contraseña en el primer login')
+  console.log('\n  ⚠️  Las contraseñas iniciales NO se muestran por seguridad.')
+  console.log('     Debes haberlas definido al ejecutar este seed.')
+  console.log('     TODOS los usuarios deben cambiar contraseña en el primer login.')
   console.log('\n  📋 PERMISOS POR ZONA:')
   console.log('  ─────────────────────────────────────────────')
   console.log('  camarero_terraza → Solo TERRAZA (mesas 31-44)')
@@ -351,11 +327,6 @@ async function seed() {
   console.log('  cocinero         → Cocina/KDS (todos los pedidos)')
   console.log('  encargado        → Reportes, Caja, Usuarios, Auditoría')
   console.log('  caja             → Cobros y sesiones de caja')
-  console.log('  ─────────────────────────────────────────────')
-  console.log('\n  ⭐ PLATOS ESPECIALES:')
-  console.log('  ─────────────────────────────────────────────')
-  console.log('  ★ Arroz Meloso de Carrillada Ibérica — 16,00 €')
-  console.log('  ★ Presa Ibérica con Salsa de Vino Oloroso — 18,00 €')
   console.log('═'.repeat(60))
 }
 

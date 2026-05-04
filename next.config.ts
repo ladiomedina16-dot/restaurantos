@@ -3,9 +3,9 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   // Vercel handles output automatically — no standalone output needed
   typescript: {
-    ignoreBuildErrors: true,
+    ignoreBuildErrors: false, // Enable TS checks for production builds
   },
-  reactStrictMode: false,
+  reactStrictMode: true,
 };
 
 export default nextConfig;
