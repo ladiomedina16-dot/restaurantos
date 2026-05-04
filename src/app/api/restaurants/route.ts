@@ -1,6 +1,6 @@
 // ============================================================
 // /api/restaurants — Restaurant management
-// GET  /api/restaurants → List restaurants (super_admin sees all with stats, others see own)
+// GET  /api/restaurants → List restaurants (super_admin sees all, others see own)
 // POST /api/restaurants → Create restaurant (super_admin only)
 // PUT  /api/restaurants → Update restaurant (super_admin can change subscriptionStatus)
 // ============================================================
@@ -32,16 +32,7 @@ export async function GET(request: Request) {
       orderBy: { createdAt: 'desc' },
       include: {
         _count: {
-          select: {
-            users: true,
-            tables: { where: { active: true } },
-            products: { where: { active: true } },
-            orders: true,
-          },
-        },
-        users: {
-          where: { role: 'admin' },
-          select: { id: true, username: true, name: true, active: true },
+          select: { users: true, products: true, orders: true },
         },
       },
     })
