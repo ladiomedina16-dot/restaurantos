@@ -144,10 +144,17 @@ export const closeCashSessionSchema = z.object({
   closingCash: z.number().min(0, 'El dinero de cierre no puede ser negativo').max(99999),
 })
 
+// ─── Supplier Payments ──────────────────────────────────────
+
+export const createSupplierPaymentSchema = z.object({
+  concept: z.string().min(1, 'Concepto obligatorio').max(200),
+  amount: z.number().min(0.01, 'El monto debe ser mayor que 0').max(99999),
+})
+
 // ─── Reports ───────────────────────────────────────────────
 
 export const reportsQuerySchema = z.object({
-  type: z.enum(['daily_sales', 'payment_methods', 'top_products', 'cancelled_orders', 'cash_closes', 'sales_by_user', 'bar_orders', 'kitchen_orders']),
+  type: z.enum(['daily_sales', 'payment_methods', 'top_products', 'cancelled_orders', 'cash_closes', 'sales_by_user', 'bar_orders', 'kitchen_orders', 'supplier_payments']),
   dateFrom: z.string().optional(),
   dateTo: z.string().optional(),
 })

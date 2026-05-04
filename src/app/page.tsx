@@ -222,6 +222,16 @@ interface UserItem {
   updatedAt: string
 }
 
+interface SupplierPaymentItem {
+  id: string
+  concept: string
+  amount: number
+  userId: string
+  user: { id: string; username: string; name: string }
+  cashSessionId: string
+  createdAt: string
+}
+
 interface DashboardData {
   stats: {
     totalOrdersToday: number
@@ -944,6 +954,7 @@ function CocinaTab() {
 
   const fetchOrders = useCallback(async () => {
     try {
+      // destination=kitchen filters out bebida items — only food items shown
       const res = await fetch('/api/orders?status=pending,in_progress&destination=kitchen', { headers: authHeaders(false) })
       if (handleFetchResponse(res) && res.ok) {
         const json = await res.json()
@@ -966,12 +977,11 @@ function CocinaTab() {
     return () => clearInterval(interval)
   }, [])
 
-  // Polling: cocina orders refresh via fast interval (Vercel-compatible, no Socket.io)
-
-  const handleTerminar = async (order: Order) => {
+  // Simplified: Cocina only uses pending → listo (ready)
+  // No payment/served states shown to kitchen
+  const handleListo = async (order: Order) => {
     setFinishing(order.id)
     try {
-      // First set to in_progress if pending
       if (order.status === 'pending') {
         const preRes = await fetch(`/api/orders/${order.id}`, {
           method: 'PUT',
@@ -988,7 +998,7 @@ function CocinaTab() {
       })
 
       if (handleFetchResponse(res) && res.ok) {
-        toast.success(`Mesa ${order.table?.number ?? '?'} — Pedido listo`)
+        toast.success(`Mesa ${order.table?.number ?? '?'} — ¡Listo!`)
         setOrders((prev) => prev.filter((o) => o.id !== order.id))
       } else {
         const err = await res.json()
@@ -1043,7 +1053,7 @@ function CocinaTab() {
         <div className="flex flex-col items-center justify-center py-20 text-gray-500">
           <CheckCheck className="size-16 mb-4" />
           <p className="text-xl font-medium">¡Todo listo!</p>
-          <p className="text-sm mt-1">No hay pedidos pendientes</p>
+          <p className="text-sm mt-1">No hay comandas pendientes</p>
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
@@ -1054,7 +1064,7 @@ function CocinaTab() {
                 order.status === 'pending' ? 'border-l-amber-500' : 'border-l-orange-500'
               } ${finishing === order.id ? 'opacity-50 scale-95' : ''}`}
             >
-              {/* Card header: Mesa + Time */}
+              {/* Card header: Mesa + Time — NO PRICES */}
               <div className="flex items-start justify-between mb-3">
                 <div>
                   <p className="text-3xl font-bold text-white">Mesa {order.table?.number ?? '?'}</p>
@@ -1069,7 +1079,7 @@ function CocinaTab() {
                 </div>
               </div>
 
-              {/* Status badge */}
+              {/* Simple status: pending or preparing — NO payment/served states */}
               <Badge
                 className={`mb-3 ${
                   order.status === 'pending'
@@ -1078,10 +1088,10 @@ function CocinaTab() {
                 }`}
                 variant="outline"
               >
-                {order.status === 'pending' ? '⏳ Pendiente' : '🔥 En preparación'}
+                {order.status === 'pending' ? '⏳ Pendiente' : '🔥 Preparando'}
               </Badge>
 
-              {/* Items list */}
+              {/* Items list — NO PRICES shown */}
               <div className="space-y-1 mb-4">
                 {order.items.map((item) => (
                   <div key={item.id} className="flex items-start gap-2 text-white">
@@ -1101,42 +1111,14 @@ function CocinaTab() {
                 ))}
               </div>
 
-              {/* Client info if any */}
-              {order.client && (
-                <p className="text-xs text-gray-500 mb-3">
-                  <UserCircle className="size-3 inline mr-1" />
-                  {order.client.name}
-                </p>
-              )}
-
-              {/* Terminar button + Print buttons */}
-              <div className="flex gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-14 border-gray-600 text-white hover:bg-gray-700"
-                  onClick={() => handlePrintTicket('kitchen', order.id, authHeaders)}
-                >
-                  <Printer className="size-5 mr-1" />
-                  Cocina
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-14 border-gray-600 text-white hover:bg-gray-700"
-                  onClick={() => handlePrintTicket('bar', order.id, authHeaders)}
-                >
-                  <Wine className="size-5 mr-1" />
-                  Barra
-                </Button>
-              </div>
+              {/* LISTO button only — no print/client/payment buttons */}
               <Button
                 className="w-full h-14 text-lg font-bold bg-green-600 hover:bg-green-700 text-white"
-                onClick={() => handleTerminar(order)}
+                onClick={() => handleListo(order)}
                 disabled={finishing === order.id}
               >
                 <CheckCircle className="size-6 mr-2" />
-                TERMINAR
+                LISTO
               </Button>
             </div>
           ))}
@@ -1332,6 +1314,11 @@ function CajaTab() {
   const [closingCashInput, setClosingCashInput] = useState('')
   const [cashSessionLoading, setCashSessionLoading] = useState(false)
   const [cashCloseSummary, setCashCloseSummary] = useState<any>(null)
+  const [supplierPayments, setSupplierPayments] = useState<SupplierPaymentItem[]>([])
+  const [showSupplierDialog, setShowSupplierDialog] = useState(false)
+  const [supplierConcept, setSupplierConcept] = useState('')
+  const [supplierAmount, setSupplierAmount] = useState('')
+  const [addingSupplier, setAddingSupplier] = useState(false)
 
   const fetchTables = useCallback(async () => {
     try {
@@ -1388,6 +1375,47 @@ function CajaTab() {
   }, [])
 
   // Polling: caja refreshes via interval (Vercel-compatible, no Socket.io)
+
+  const fetchSupplierPayments = useCallback(async () => {
+    if (!cashSession?.id) { setSupplierPayments([]); return }
+    try {
+      const res = await fetch(`/api/supplier-payments?cashSessionId=${cashSession.id}`, { headers: authHeaders(false) })
+      if (handleFetchResponse(res) && res.ok) {
+        const json = await res.json()
+        setSupplierPayments(json.supplierPayments)
+      }
+    } catch { /* silently fail */ }
+  }, [authHeaders, handleFetchResponse, cashSession])
+
+  useEffect(() => {
+    fetchSupplierPayments()
+  }, [fetchSupplierPayments])
+
+  const handleAddSupplier = async () => {
+    if (!supplierConcept.trim() || !supplierAmount) return
+    setAddingSupplier(true)
+    try {
+      const res = await fetch('/api/supplier-payments', {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify({ concept: supplierConcept.trim(), amount: parseFloat(supplierAmount) }),
+      })
+      if (handleFetchResponse(res) && res.ok) {
+        toast.success('Pago a proveedor registrado')
+        setSupplierConcept('')
+        setSupplierAmount('')
+        setShowSupplierDialog(false)
+        fetchSupplierPayments()
+      } else {
+        const err = await res.json()
+        toast.error(err.error || 'Error al registrar pago')
+      }
+    } catch {
+      toast.error('Error de red')
+    } finally {
+      setAddingSupplier(false)
+    }
+  }
 
   // Get orders for a table
   const getTableOrders = (tableId: string) =>
@@ -1715,14 +1743,26 @@ function CajaTab() {
               <div className="flex justify-between"><span>Ventas totales:</span><span className="font-semibold">{formatEUR(cashCloseSummary.totalSales ?? 0)}</span></div>
               <div className="flex justify-between"><span>Efectivo:</span><span className="font-semibold">{formatEUR(cashCloseSummary.totalCash ?? 0)}</span></div>
               <div className="flex justify-between"><span>Tarjeta:</span><span className="font-semibold">{formatEUR(cashCloseSummary.totalCard ?? 0)}</span></div>
+              <div className="flex justify-between"><span>Proveedores:</span><span className="font-semibold text-orange-700">-{formatEUR(cashCloseSummary.totalSuppliers ?? 0)}</span></div>
               <Separator />
-              <div className="flex justify-between"><span>Esperado:</span><span className="font-semibold">{formatEUR(cashCloseSummary.expectedCash ?? 0)}</span></div>
+              <div className="flex justify-between"><span>Esperado (apertura + efectivo - proveedores):</span><span className="font-semibold">{formatEUR(cashCloseSummary.expectedCash ?? 0)}</span></div>
               <div className="flex justify-between"><span>Real:</span><span className="font-semibold">{formatEUR(cashCloseSummary.closingCash ?? 0)}</span></div>
               <div className="flex justify-between"><span>Diferencia:</span>
                 <span className={`font-bold ${(cashCloseSummary.difference ?? 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                   {formatEUR(cashCloseSummary.difference ?? 0)}
                 </span>
               </div>
+              {(cashCloseSummary.supplierPayments ?? []).length > 0 && (
+                <div className="mt-2 pt-2 border-t">
+                  <p className="text-xs font-semibold mb-1">Pagos a proveedores:</p>
+                  {(cashCloseSummary.supplierPayments ?? []).map((sp: { id: string; concept: string; amount: number; registeredBy: string }) => (
+                    <div key={sp.id} className="flex justify-between text-xs">
+                      <span>{sp.concept} ({sp.registeredBy})</span>
+                      <span className="text-orange-700">-{formatEUR(sp.amount)}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
               <Button variant="ghost" size="sm" className="mt-1 text-xs" onClick={() => setCashCloseSummary(null)}>
                 Cerrar resumen
               </Button>
@@ -1730,6 +1770,52 @@ function CajaTab() {
           )}
         </CardContent>
       </Card>
+
+      {/* Supplier Payments Section */}
+      {cashSession && (
+        <Card className="rounded-xl border-2 border-orange-200 bg-orange-50/50">
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <Flame className="size-5 text-orange-600" />
+                <h3 className="font-bold text-lg">Pagos a Proveedores</h3>
+                {supplierPayments.length > 0 && (
+                  <Badge variant="outline" className="text-xs">
+                    {supplierPayments.length} pago{supplierPayments.length > 1 ? 's' : ''} · {formatEUR(supplierPayments.reduce((s, sp) => s + sp.amount, 0))}
+                  </Badge>
+                )}
+              </div>
+              <Button
+                size="sm"
+                className="bg-orange-600 hover:bg-orange-700 text-white"
+                onClick={() => setShowSupplierDialog(true)}
+              >
+                <Plus className="size-4 mr-1" />
+                Añadir
+              </Button>
+            </div>
+            {supplierPayments.length > 0 ? (
+              <ScrollArea className="max-h-32">
+                <div className="space-y-1">
+                  {supplierPayments.map((sp) => (
+                    <div key={sp.id} className="flex items-center justify-between text-sm bg-white rounded-lg p-2">
+                      <div>
+                        <span className="font-medium">{sp.concept}</span>
+                        <span className="text-muted-foreground ml-2 text-xs">
+                          {sp.user?.name || sp.user?.username} · {formatTime(sp.createdAt)}
+                        </span>
+                      </div>
+                      <span className="font-bold text-orange-700">{formatEUR(sp.amount)}</span>
+                    </div>
+                  ))}
+                </div>
+              </ScrollArea>
+            ) : (
+              <p className="text-sm text-muted-foreground">No hay pagos a proveedores registrados</p>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {/* Open Cash Dialog */}
       <Dialog open={showOpenCashDialog} onOpenChange={setShowOpenCashDialog}>
@@ -1840,6 +1926,46 @@ function CajaTab() {
         </DialogContent>
       </Dialog>
 
+      {/* Add Supplier Payment Dialog */}
+      <Dialog open={showSupplierDialog} onOpenChange={setShowSupplierDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Pago a Proveedor</DialogTitle>
+            <DialogDescription>Registrar un pago a proveedor durante la sesión de caja actual</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>Concepto</Label>
+              <Input
+                placeholder="Ej: bebidas, pan, hielo..."
+                value={supplierConcept}
+                onChange={(e) => setSupplierConcept(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Monto (€)</Label>
+              <Input
+                type="number"
+                step="0.01"
+                placeholder="0.00"
+                value={supplierAmount}
+                onChange={(e) => setSupplierAmount(e.target.value)}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowSupplierDialog(false)}>Cancelar</Button>
+            <Button
+              className="bg-orange-600 hover:bg-orange-700 text-white"
+              disabled={addingSupplier || !supplierConcept.trim() || !supplierAmount}
+              onClick={handleAddSupplier}
+            >
+              {addingSupplier ? 'Registrando...' : 'Registrar Pago'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <div className="flex items-center justify-between">
         <h2 className="text-2xl font-bold tracking-tight">Caja</h2>
         <Button variant="outline" size="sm" className="h-10" onClick={() => { fetchTables(); fetchActiveOrders() }}>
@@ -1920,7 +2046,7 @@ function CajaTab() {
 
 function ReportesTab() {
   const { authHeaders, handleFetchResponse } = useAuth()
-  const [reportType, setReportType] = useState<'daily_sales' | 'payment_methods' | 'top_products' | 'cancelled_orders' | 'cash_closes' | 'sales_by_user' | 'bar_orders' | 'kitchen_orders'>('daily_sales')
+  const [reportType, setReportType] = useState<'daily_sales' | 'payment_methods' | 'top_products' | 'cancelled_orders' | 'cash_closes' | 'sales_by_user' | 'bar_orders' | 'kitchen_orders' | 'supplier_payments'>('daily_sales')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
   const [reportData, setReportData] = useState<any>(null)
@@ -1955,6 +2081,7 @@ function ReportesTab() {
     { value: 'sales_by_user' as const, label: 'Ventas por camarero' },
     { value: 'bar_orders' as const, label: 'Comandas barra' },
     { value: 'kitchen_orders' as const, label: 'Comandas cocina' },
+    { value: 'supplier_payments' as const, label: 'Pagos proveedores' },
   ]
 
   return (
@@ -2023,18 +2150,18 @@ function ReportesTab() {
                 <div className="grid grid-cols-3 gap-4 mb-4">
                   <div className="text-center p-3 bg-amber-50 rounded-lg">
                     <p className="text-sm text-muted-foreground">Ingresos</p>
-                    <p className="text-2xl font-bold text-amber-700">{formatEUR(reportData.totalRevenue ?? 0)}</p>
+                    <p className="text-2xl font-bold text-amber-700">{formatEUR(reportData.report?.totalRevenue ?? reportData.totalRevenue ?? 0)}</p>
                   </div>
                   <div className="text-center p-3 bg-amber-50 rounded-lg">
                     <p className="text-sm text-muted-foreground">Pedidos</p>
-                    <p className="text-2xl font-bold text-amber-700">{reportData.totalOrders ?? 0}</p>
+                    <p className="text-2xl font-bold text-amber-700">{reportData.report?.totalOrders ?? reportData.totalOrders ?? 0}</p>
                   </div>
                   <div className="text-center p-3 bg-amber-50 rounded-lg">
                     <p className="text-sm text-muted-foreground">Ticket medio</p>
-                    <p className="text-2xl font-bold text-amber-700">{formatEUR(reportData.avgTicket ?? 0)}</p>
+                    <p className="text-2xl font-bold text-amber-700">{formatEUR(reportData.report?.avgTicket ?? reportData.avgTicket ?? 0)}</p>
                   </div>
                 </div>
-                {reportData.days && reportData.days.length > 0 && (
+                {(reportData.report?.days ?? reportData.days)?.length > 0 && (
                   <div className="overflow-x-auto">
                     <table className="w-full text-sm">
                       <thead>
@@ -2045,7 +2172,7 @@ function ReportesTab() {
                         </tr>
                       </thead>
                       <tbody>
-                        {reportData.days.map((d: any, i: number) => (
+                      {(reportData.report?.days ?? reportData.days ?? []).map((d: any, i: number) => (
                           <tr key={i} className="border-b">
                             <td className="p-2">{d.date}</td>
                             <td className="text-right p-2 font-semibold">{formatEUR(d.revenue)}</td>
@@ -2067,16 +2194,16 @@ function ReportesTab() {
                 <CardContent className="p-6 text-center">
                   <Euro className="size-10 mx-auto mb-2 text-green-600" />
                   <p className="text-sm text-muted-foreground">Efectivo</p>
-                  <p className="text-3xl font-bold text-green-700">{formatEUR(reportData.efectivo?.total ?? 0)}</p>
-                  <p className="text-sm text-muted-foreground mt-1">{reportData.efectivo?.count ?? 0} pagos</p>
+                  <p className="text-3xl font-bold text-green-700">{formatEUR(reportData.report?.efectivo?.total ?? 0)}</p>
+                  <p className="text-sm text-muted-foreground mt-1">{reportData.report?.efectivo?.count ?? 0} pagos</p>
                 </CardContent>
               </Card>
               <Card className="rounded-xl">
                 <CardContent className="p-6 text-center">
                   <CreditCard className="size-10 mx-auto mb-2 text-blue-600" />
                   <p className="text-sm text-muted-foreground">Tarjeta</p>
-                  <p className="text-3xl font-bold text-blue-700">{formatEUR(reportData.tarjeta?.total ?? 0)}</p>
-                  <p className="text-sm text-muted-foreground mt-1">{reportData.tarjeta?.count ?? 0} pagos</p>
+                  <p className="text-3xl font-bold text-blue-700">{formatEUR(reportData.report?.tarjeta?.total ?? 0)}</p>
+                  <p className="text-sm text-muted-foreground mt-1">{reportData.report?.tarjeta?.count ?? 0} pagos</p>
                 </CardContent>
               </Card>
             </div>
@@ -2092,9 +2219,9 @@ function ReportesTab() {
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                {reportData.products && reportData.products.length > 0 ? (
+                {(Array.isArray(reportData.report) ? reportData.report : reportData.report?.products ?? reportData.products)?.length > 0 ? (
                   <div className="space-y-2">
-                    {reportData.products.map((p: any, i: number) => (
+                    {(Array.isArray(reportData.report) ? reportData.report : reportData.report?.products ?? reportData.products ?? []).map((p: any, i: number) => (
                       <div key={i} className="flex items-center justify-between p-3 bg-amber-50 rounded-lg">
                         <div className="flex items-center gap-3">
                           <span className="flex size-8 items-center justify-center rounded-full bg-amber-600 text-white text-sm font-bold">
@@ -2128,13 +2255,13 @@ function ReportesTab() {
               <CardContent>
                 <div className="mb-4 p-3 bg-red-50 rounded-lg text-center">
                   <p className="text-sm text-muted-foreground">Ingresos perdidos</p>
-                  <p className="text-2xl font-bold text-red-700">{formatEUR(reportData.totalLost ?? reportData.lostRevenue ?? 0)}</p>
-                  <p className="text-sm text-muted-foreground">{reportData.totalCount ?? reportData.orders?.length ?? 0} pedidos</p>
+                  <p className="text-2xl font-bold text-red-700">{formatEUR(reportData.report?.totalLost ?? 0)}</p>
+                  <p className="text-sm text-muted-foreground">{reportData.report?.totalCancelled ?? reportData.report?.orders?.length ?? 0} pedidos</p>
                 </div>
-                {reportData.orders && reportData.orders.length > 0 ? (
+                {reportData.report?.orders && reportData.report.orders.length > 0 ? (
                   <ScrollArea className="max-h-96">
                     <div className="space-y-2">
-                      {reportData.orders.map((o: any) => (
+                      {reportData.report.orders.map((o: any) => (
                         <div key={o.id} className="border rounded-lg p-3">
                           <div className="flex justify-between mb-1">
                             <span className="font-semibold">Mesa {o.table?.number ?? '?'}</span>
@@ -2162,32 +2289,66 @@ function ReportesTab() {
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                {reportData.sessions && reportData.sessions.length > 0 ? (
-                  <ScrollArea className="max-h-96">
-                    <table className="w-full text-sm">
-                      <thead>
-                        <tr className="border-b">
-                          <th className="text-left p-2">Apertura</th>
-                          <th className="text-right p-2">Apertura €</th>
-                          <th className="text-right p-2">Cierre €</th>
-                          <th className="text-right p-2">Ventas</th>
-                          <th className="text-right p-2">Diferencia</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {reportData.sessions.map((s: any) => (
-                          <tr key={s.id} className="border-b">
-                            <td className="p-2">{s.openedAt ? new Date(s.openedAt).toLocaleString('es-ES') : '-'}</td>
-                            <td className="text-right p-2">{formatEUR(s.openingCash)}</td>
-                            <td className="text-right p-2">{s.closingCash != null ? formatEUR(s.closingCash) : '-'}</td>
-                            <td className="text-right p-2">{formatEUR(s.totalSales ?? 0)}</td>
-                            <td className={`text-right p-2 font-semibold ${(s.difference ?? 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                              {s.difference != null ? formatEUR(s.difference) : '-'}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                {reportData.report && reportData.report.length > 0 ? (
+                  <ScrollArea className="max-h-[600px]">
+                    <div className="space-y-4">
+                      {reportData.report.map((s: any) => (
+                        <div key={s.id} className="border rounded-lg p-4">
+                          <div className="flex justify-between items-center mb-2">
+                            <div>
+                              <span className="font-semibold">{s.openedAt ? new Date(s.openedAt).toLocaleString('es-ES') : '-'}</span>
+                              <span className="text-muted-foreground ml-2">→ {s.closedAt ? new Date(s.closedAt).toLocaleString('es-ES') : '-'}</span>
+                            </div>
+                            <span className={`font-bold text-lg ${(s.difference ?? 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                              Dif: {s.difference != null ? formatEUR(s.difference) : '-'}
+                            </span>
+                          </div>
+                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-sm mb-2">
+                            <div className="bg-green-50 rounded p-2 text-center">
+                              <p className="text-xs text-muted-foreground">Efectivo</p>
+                              <p className="font-bold text-green-700">{formatEUR(s.totalCash ?? 0)}</p>
+                            </div>
+                            <div className="bg-blue-50 rounded p-2 text-center">
+                              <p className="text-xs text-muted-foreground">Tarjeta</p>
+                              <p className="font-bold text-blue-700">{formatEUR(s.totalCard ?? 0)}</p>
+                            </div>
+                            <div className="bg-amber-50 rounded p-2 text-center">
+                              <p className="text-xs text-muted-foreground">Ventas</p>
+                              <p className="font-bold text-amber-700">{formatEUR(s.totalSales ?? 0)}</p>
+                            </div>
+                            <div className="bg-orange-50 rounded p-2 text-center">
+                              <p className="text-xs text-muted-foreground">Proveedores</p>
+                              <p className="font-bold text-orange-700">-{formatEUR(s.totalSuppliers ?? 0)}</p>
+                            </div>
+                          </div>
+                          <div className="grid grid-cols-3 gap-2 text-xs mb-2">
+                            <div className="text-center">
+                              <span className="text-muted-foreground">Apertura: </span>
+                              <span className="font-semibold">{formatEUR(s.openingCash ?? 0)}</span>
+                            </div>
+                            <div className="text-center">
+                              <span className="text-muted-foreground">Esperado: </span>
+                              <span className="font-semibold">{formatEUR(s.expectedCash ?? 0)}</span>
+                            </div>
+                            <div className="text-center">
+                              <span className="text-muted-foreground">Real: </span>
+                              <span className="font-semibold">{formatEUR(s.closingCash ?? 0)}</span>
+                            </div>
+                          </div>
+                          {s.supplierPayments && s.supplierPayments.length > 0 && (
+                            <div className="mt-2 pt-2 border-t">
+                              <p className="text-xs font-semibold mb-1">Pagos a proveedores:</p>
+                              {s.supplierPayments.map((sp: any) => (
+                                <div key={sp.id} className="flex justify-between text-xs">
+                                  <span>{sp.concept} ({sp.registeredBy})</span>
+                                  <span className="text-orange-700 font-semibold">-{formatEUR(sp.amount)}</span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
                   </ScrollArea>
                 ) : (
                   <p className="text-muted-foreground text-center py-8">No hay cierres de caja</p>
@@ -2206,9 +2367,9 @@ function ReportesTab() {
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                {reportData.users && reportData.users.length > 0 ? (
+                {(Array.isArray(reportData.report) ? reportData.report : reportData.report ?? reportData.users)?.length > 0 ? (
                   <div className="space-y-2">
-                    {reportData.users.map((u: any, i: number) => (
+                    {(Array.isArray(reportData.report) ? reportData.report : reportData.report ?? reportData.users ?? []).map((u: any, i: number) => (
                       <div key={i} className="flex items-center justify-between p-3 bg-amber-50 rounded-lg">
                         <div className="flex items-center gap-3">
                           <span className="flex size-8 items-center justify-center rounded-full bg-amber-600 text-white text-sm font-bold">
@@ -2237,21 +2398,21 @@ function ReportesTab() {
                 <CardContent className="p-6 text-center">
                   <Beer className="size-10 mx-auto mb-2 text-amber-600" />
                   <p className="text-sm text-muted-foreground">Bebidas servidas</p>
-                  <p className="text-3xl font-bold text-amber-700">{reportData.totalItems ?? 0}</p>
+                  <p className="text-3xl font-bold text-amber-700">{reportData.report?.totalItems ?? 0}</p>
                 </CardContent>
               </Card>
               <Card className="rounded-xl">
                 <CardContent className="p-6 text-center">
                   <Euro className="size-10 mx-auto mb-2 text-green-600" />
                   <p className="text-sm text-muted-foreground">Ingresos barra</p>
-                  <p className="text-3xl font-bold text-green-700">{formatEUR(reportData.totalRevenue ?? 0)}</p>
+                  <p className="text-3xl font-bold text-green-700">{formatEUR(reportData.report?.totalRevenue ?? 0)}</p>
                 </CardContent>
               </Card>
               <Card className="rounded-xl">
                 <CardContent className="p-6 text-center">
                   <Receipt className="size-10 mx-auto mb-2 text-amber-600" />
                   <p className="text-sm text-muted-foreground">Comandas</p>
-                  <p className="text-3xl font-bold text-amber-700">{reportData.orders ?? 0}</p>
+                  <p className="text-3xl font-bold text-amber-700">{reportData.report?.orders ?? 0}</p>
                 </CardContent>
               </Card>
             </div>
@@ -2264,24 +2425,67 @@ function ReportesTab() {
                 <CardContent className="p-6 text-center">
                   <ChefHat className="size-10 mx-auto mb-2 text-orange-600" />
                   <p className="text-sm text-muted-foreground">Platos servidos</p>
-                  <p className="text-3xl font-bold text-orange-700">{reportData.totalItems ?? 0}</p>
+                  <p className="text-3xl font-bold text-orange-700">{reportData.report?.totalItems ?? reportData.totalItems ?? 0}</p>
                 </CardContent>
               </Card>
               <Card className="rounded-xl">
                 <CardContent className="p-6 text-center">
                   <Euro className="size-10 mx-auto mb-2 text-green-600" />
                   <p className="text-sm text-muted-foreground">Ingresos cocina</p>
-                  <p className="text-3xl font-bold text-green-700">{formatEUR(reportData.totalRevenue ?? 0)}</p>
+                  <p className="text-3xl font-bold text-green-700">{formatEUR(reportData.report?.totalRevenue ?? reportData.totalRevenue ?? 0)}</p>
                 </CardContent>
               </Card>
               <Card className="rounded-xl">
                 <CardContent className="p-6 text-center">
                   <Receipt className="size-10 mx-auto mb-2 text-orange-600" />
                   <p className="text-sm text-muted-foreground">Comandas</p>
-                  <p className="text-3xl font-bold text-orange-700">{reportData.orders ?? 0}</p>
+                  <p className="text-3xl font-bold text-orange-700">{reportData.report?.orders ?? reportData.orders ?? 0}</p>
                 </CardContent>
               </Card>
             </div>
+          )}
+
+          {/* Supplier Payments */}
+          {reportType === 'supplier_payments' && (
+            <Card className="rounded-xl">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Flame className="size-5 text-orange-600" />
+                  Pagos a Proveedores
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-2 gap-4 mb-4">
+                  <div className="text-center p-3 bg-orange-50 rounded-lg">
+                    <p className="text-sm text-muted-foreground">Total pagado</p>
+                    <p className="text-2xl font-bold text-orange-700">{formatEUR(reportData.report?.totalAmount ?? 0)}</p>
+                  </div>
+                  <div className="text-center p-3 bg-orange-50 rounded-lg">
+                    <p className="text-sm text-muted-foreground">Nº pagos</p>
+                    <p className="text-2xl font-bold text-orange-700">{reportData.report?.count ?? 0}</p>
+                  </div>
+                </div>
+                {reportData.report?.payments && reportData.report.payments.length > 0 ? (
+                  <ScrollArea className="max-h-96">
+                    <div className="space-y-2">
+                      {reportData.report.payments.map((sp: any) => (
+                        <div key={sp.id} className="flex items-center justify-between p-3 bg-orange-50 rounded-lg">
+                          <div>
+                            <p className="font-semibold">{sp.concept}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {sp.registeredBy} · {new Date(sp.createdAt).toLocaleString('es-ES')}
+                            </p>
+                          </div>
+                          <span className="font-bold text-orange-700 text-lg">{formatEUR(sp.amount)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </ScrollArea>
+                ) : (
+                  <p className="text-muted-foreground text-center py-8">No hay pagos a proveedores</p>
+                )}
+              </CardContent>
+            </Card>
           )}
         </>
       )}

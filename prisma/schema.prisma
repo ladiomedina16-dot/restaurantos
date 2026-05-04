@@ -30,7 +30,8 @@ model Restaurant {
   tables       Table[]
   clients      Client[]
   orders       Order[]
-  cashSessions CashSession[]
+  cashSessions      CashSession[]
+  supplierPayments   SupplierPayment[]
 
   @@index([subscriptionStatus])
 }
@@ -59,6 +60,7 @@ model User {
   auditLogs            AuditLog[]
   openedCashSessions   CashSession[] @relation("CashSessionOpener")
   closedCashSessions   CashSession[] @relation("CashSessionCloser")
+  supplierPayments     SupplierPayment[]
 
   @@index([restaurantId])
   @@index([role])
@@ -213,15 +215,17 @@ model CashSession {
   totalSales     Float     @default(0)  // total de ventas
   totalCard      Float     @default(0)  // total pagos tarjeta
   totalCash      Float     @default(0)  // total pagos efectivo
+  totalSuppliers Float     @default(0)  // total pagos a proveedores
   difference     Float?     // diferencia entre cierre y esperado
   status         String    @default("open")  // open, closed
   openedAt       DateTime  @default(now())
   closedAt       DateTime?
 
-  restaurant Restaurant @relation(fields: [restaurantId], references: [id])
-  openedBy   User       @relation("CashSessionOpener", fields: [openedById], references: [id])
-  closedBy   User?      @relation("CashSessionCloser", fields: [closedById], references: [id])
-  payments   Payment[]
+  restaurant       Restaurant        @relation(fields: [restaurantId], references: [id])
+  openedBy         User              @relation("CashSessionOpener", fields: [openedById], references: [id])
+  closedBy         User?             @relation("CashSessionCloser", fields: [closedById], references: [id])
+  payments         Payment[]
+  supplierPayments SupplierPayment[]
 
   @@index([restaurantId])
   @@index([status])
@@ -246,5 +250,25 @@ model AuditLog {
   @@index([userId])
   @@index([action])
   @@index([entityType])
+  @@index([createdAt])
+}
+
+// ─── PAGOS A PROVEEDORES ────────────────────────────────────
+model SupplierPayment {
+  id             String   @id @default(cuid())
+  concept        String   // concepto/texto libre: "bebidas", "pan", "hielo"
+  amount         Float    // monto del pago
+  userId         String   // usuario que lo registra
+  restaurantId   String   // restaurante
+  cashSessionId  String   // sesión de caja vinculada
+  createdAt      DateTime @default(now())
+
+  user        User        @relation(fields: [userId], references: [id])
+  restaurant  Restaurant  @relation(fields: [restaurantId], references: [id])
+  cashSession CashSession @relation(fields: [cashSessionId], references: [id])
+
+  @@index([restaurantId])
+  @@index([cashSessionId])
+  @@index([userId])
   @@index([createdAt])
 }

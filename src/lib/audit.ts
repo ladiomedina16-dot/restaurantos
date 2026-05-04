@@ -31,6 +31,7 @@ export type AuditAction =
   | 'password_reset'
   | 'onboarding_completed'
   | 'subscription_changed'
+  | 'supplier_payment_created'
 
 export type EntityType =
   | 'order'
@@ -42,6 +43,7 @@ export type EntityType =
   | 'user'
   | 'auth'
   | 'restaurant'
+  | 'supplier_payment'
 
 interface AuditParams {
   restaurantId: string

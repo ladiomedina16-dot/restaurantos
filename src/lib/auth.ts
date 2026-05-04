@@ -169,6 +169,8 @@ export function canAccessTab(role: UserRole, tab: string): boolean {
       return ['super_admin', 'admin', 'encargado', 'camarero'].includes(role)
     case 'cocina':
       return ['super_admin', 'admin', 'encargado', 'cocina'].includes(role)
+    case 'barra':
+      return ['super_admin', 'admin', 'encargado', 'caja', 'camarero'].includes(role)
     case 'caja':
       return ['super_admin', 'admin', 'encargado', 'caja', 'camarero'].includes(role)
     case 'reportes':

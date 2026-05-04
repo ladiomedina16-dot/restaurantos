@@ -50,6 +50,14 @@ export async function GET(request: Request) {
             },
             orderBy: { createdAt: 'desc' },
           },
+          supplierPayments: {
+            include: {
+              user: {
+                select: { id: true, username: true, name: true },
+              },
+            },
+            orderBy: { createdAt: 'desc' },
+          },
         },
         orderBy: { openedAt: 'desc' },
       })

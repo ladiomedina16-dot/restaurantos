@@ -58,6 +58,8 @@ export async function GET(request: Request) {
         return await barOrdersReport(restaurantId, dateFromParsed, dateToParsed)
       case 'kitchen_orders':
         return await kitchenOrdersReport(restaurantId, dateFromParsed, dateToParsed)
+      case 'supplier_payments':
+        return await supplierPaymentsReport(restaurantId, dateFromParsed, dateToParsed)
       default:
         return Response.json({ error: 'Tipo de reporte no válido' }, { status: 400 })
     }
@@ -289,6 +291,14 @@ async function cashClosesReport(restaurantId: string, dateFrom: Date, dateTo: Da
       closedBy: {
         select: { username: true },
       },
+      supplierPayments: {
+        include: {
+          user: {
+            select: { username: true, name: true },
+          },
+        },
+        orderBy: { createdAt: 'desc' },
+      },
     },
     orderBy: { closedAt: 'desc' },
   })
@@ -300,10 +310,18 @@ async function cashClosesReport(restaurantId: string, dateFrom: Date, dateTo: Da
     openingCash: s.openingCash,
     closingCash: s.closingCash ?? 0,
     expectedCash: s.expectedCash ?? 0,
-    difference: s.difference ?? 0,
     totalSales: s.totalSales,
     totalCash: s.totalCash,
     totalCard: s.totalCard,
+    totalSuppliers: s.totalSuppliers,
+    supplierPayments: s.supplierPayments.map((sp) => ({
+      id: sp.id,
+      concept: sp.concept,
+      amount: sp.amount,
+      registeredBy: sp.user.name || sp.user.username,
+      createdAt: sp.createdAt,
+    })),
+    difference: s.difference ?? 0,
     openedBy: s.openedBy.username,
     closedBy: s.closedBy?.username ?? '',
   }))
@@ -428,6 +446,51 @@ async function kitchenOrdersReport(restaurantId: string, dateFrom: Date, dateTo:
       totalItems,
       totalRevenue,
       orders: orderIds.size,
+    },
+  })
+}
+
+// ─── supplier_payments ──────────────────────────────────────
+// List supplier payments in date range with totals
+async function supplierPaymentsReport(restaurantId: string, dateFrom: Date, dateTo: Date) {
+  const supplierPayments = await db.supplierPayment.findMany({
+    where: {
+      restaurantId,
+      createdAt: {
+        gte: dateFrom,
+        lt: dateTo,
+      },
+    },
+    include: {
+      user: {
+        select: { username: true, name: true },
+      },
+      cashSession: {
+        select: { id: true, openedAt: true, closedAt: true },
+      },
+    },
+    orderBy: { createdAt: 'desc' },
+  })
+
+  const totalAmount = Math.round(
+    supplierPayments.reduce((sum, sp) => sum + sp.amount, 0) * 100
+  ) / 100
+
+  const payments = supplierPayments.map((sp) => ({
+    id: sp.id,
+    concept: sp.concept,
+    amount: sp.amount,
+    registeredBy: sp.user.name || sp.user.username,
+    cashSessionId: sp.cashSessionId,
+    cashSessionOpenedAt: sp.cashSession.openedAt,
+    createdAt: sp.createdAt,
+  }))
+
+  return Response.json({
+    report: {
+      totalAmount,
+      count: supplierPayments.length,
+      payments,
     },
   })
 }
