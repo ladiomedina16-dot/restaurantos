@@ -211,7 +211,7 @@ export function validateInput<T>(schema: z.ZodSchema<T>, data: unknown): { succe
     return { success: true, data: parsed }
   } catch (err) {
     if (err instanceof ZodError) {
-      const errors = err.errors.map((e) => `${e.path.join('.')}: ${e.message}`).join('; ')
+      const errors = err.issues.map((e) => `${e.path.join('.')}: ${e.message}`).join('; ')
       return {
         success: false,
         error: NextResponse.json(

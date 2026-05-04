@@ -334,7 +334,7 @@ async function seed() {
     { name: 'Francisco Javier León Soto', phone: '699 111 222', email: 'franjavier.ls@email.com', points: 200, visits: 42 },
   ]
 
-  const clients = []
+  const clients: any[] = []
   for (const c of clientsData) {
     const client = await db.client.create({
       data: { ...c, restaurantId: r1 },
