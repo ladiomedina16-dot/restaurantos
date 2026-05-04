@@ -55,6 +55,8 @@ export async function GET(request: Request) {
       where.table = { zone: userZone }
     }
 
+    const destination = searchParams.get('destination') // 'bar' or 'kitchen'
+
     const orders = await db.order.findMany({
       where,
       include: {
@@ -74,6 +76,27 @@ export async function GET(request: Request) {
       },
       orderBy: { createdAt: 'desc' },
     })
+
+    // ─── Destination filter: Barra vs Cocina ────────────────
+    // destination=bar     → only items where product.category === 'bebida'
+    // destination=kitchen → only items where product.category !== 'bebida'
+    // no destination      → return all items (default behavior)
+    if (destination === 'bar' || destination === 'kitchen') {
+      const filteredOrders = orders
+        .map((order) => {
+          const filteredItems = order.items.filter((item) => {
+            if (destination === 'bar') {
+              return item.product.category === 'bebida'
+            }
+            // destination === 'kitchen'
+            return item.product.category !== 'bebida'
+          })
+          return { ...order, items: filteredItems }
+        })
+        .filter((order) => order.items.length > 0) // Exclude orders with no matching items
+
+      return NextResponse.json({ orders: filteredOrders })
+    }
 
     return NextResponse.json({ orders })
   } catch (error) {

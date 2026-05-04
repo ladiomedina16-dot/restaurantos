@@ -104,7 +104,7 @@ const CLIENT_ROLE_PERMISSIONS: Record<string, string[]> = {
   super_admin: ['*'],
   admin: ['orders:read', 'orders:create', 'orders:update', 'orders:pay', 'products:read', 'products:create', 'products:update', 'products:delete', 'tables:read', 'tables:create', 'tables:update', 'tables:delete', 'clients:read', 'clients:create', 'clients:update', 'clients:delete', 'users:read', 'users:create', 'users:update', 'users:delete', 'payments:read', 'dashboard:read', 'cash:read', 'cash:open', 'cash:close', 'print:read', 'audit:read'],
   encargado: ['orders:read', 'orders:create', 'orders:update', 'orders:pay', 'products:read', 'products:update', 'tables:read', 'tables:update', 'clients:read', 'clients:create', 'clients:update', 'users:read', 'payments:read', 'dashboard:read', 'cash:read', 'cash:open', 'cash:close', 'print:read', 'audit:read'],
-  camarero: ['orders:read', 'orders:create', 'products:read', 'tables:read', 'clients:read', 'clients:create'],
+  camarero: ['orders:read', 'orders:create', 'orders:pay', 'products:read', 'tables:read', 'clients:read', 'clients:create'],
   cocina: ['orders:read', 'orders:update', 'products:read'],
   caja: ['orders:read', 'orders:pay', 'products:read', 'tables:read', 'clients:read', 'payments:read', 'cash:read', 'cash:open', 'cash:close', 'print:read'],
 }
@@ -324,8 +324,8 @@ function CamareroTab() {
   const [clients, setClients] = useState<Client[]>([])
   const [loading, setLoading] = useState(true)
 
-  // Flow state: 'tables' | 'menu'
-  const [view, setView] = useState<'tables' | 'menu'>('tables')
+  // Flow state: 'tables' | 'menu' | 'cuenta'
+  const [view, setView] = useState<'tables' | 'menu' | 'cuenta'>('tables')
   const [selectedTable, setSelectedTable] = useState<TableItem | null>(null)
   const [selectedClientId, setSelectedClientId] = useState('')
   const [clientSearch, setClientSearch] = useState('')
@@ -333,6 +333,13 @@ function CamareroTab() {
   const [productSearch, setProductSearch] = useState('')
   const [activeCategory, setActiveCategory] = useState('bebida')
   const [sending, setSending] = useState(false)
+
+  // Cuenta (bill) state
+  const [cuentaTable, setCuentaTable] = useState<TableItem | null>(null)
+  const [cuentaOrders, setCuentaOrders] = useState<Order[]>([])
+  const [cuentaLoading, setCuentaLoading] = useState(false)
+  const [paymentMethod, setPaymentMethod] = useState<'efectivo' | 'tarjeta'>('efectivo')
+  const [paying, setPaying] = useState(false)
 
   const fetchTables = useCallback(async () => {
     try {
@@ -363,6 +370,19 @@ function CamareroTab() {
         setClients(json.clients)
       }
     } catch { /* silently fail */ }
+  }, [authHeaders, handleFetchResponse])
+
+  const fetchCuentaOrders = useCallback(async (tableId: string) => {
+    setCuentaLoading(true)
+    try {
+      const res = await fetch(`/api/orders?status=pending,in_progress,ready,served&tableId=${tableId}`, { headers: authHeaders(false) })
+      if (handleFetchResponse(res) && res.ok) {
+        const json = await res.json()
+        setCuentaOrders(json.orders)
+      }
+    } catch { /* silently fail */ } finally {
+      setCuentaLoading(false)
+    }
   }, [authHeaders, handleFetchResponse])
 
   useEffect(() => {
@@ -441,6 +461,53 @@ function CamareroTab() {
       setSending(false)
     }
   }
+
+  const handlePedirCuenta = (table: TableItem) => {
+    setCuentaTable(table)
+    setCuentaOrders([])
+    setPaymentMethod('efectivo')
+    fetchCuentaOrders(table.id)
+    setView('cuenta')
+  }
+
+  const handleCobrar = async () => {
+    if (!cuentaTable || cuentaOrders.length === 0) return
+    setPaying(true)
+    try {
+      for (const order of cuentaOrders) {
+        const res = await fetch(`/api/orders/${order.id}/pay`, {
+          method: 'POST',
+          headers: authHeaders(),
+          body: JSON.stringify({ applyDiscount: true, paymentMethod }),
+        })
+        if (!handleFetchResponse(res) || !res.ok) {
+          const err = await res.json()
+          toast.error(err.error || 'Error al cobrar')
+          setPaying(false)
+          return
+        }
+      }
+      toast.success(`Mesa ${cuentaTable.number} cobrada — ${formatEUR(cuentaTotal)}`)
+      setCuentaTable(null)
+      setCuentaOrders([])
+      setView('tables')
+      fetchTables()
+    } catch {
+      toast.error('Error de red')
+    } finally {
+      setPaying(false)
+    }
+  }
+
+  // Cuenta totals
+  const cuentaAllItems = cuentaOrders.flatMap((o) => o.items)
+  const cuentaSubtotal = cuentaAllItems.reduce((sum, item) => sum + item.subtotal, 0)
+  const cuentaBebidasTotal = cuentaAllItems.filter((i) => i.product?.category === 'bebida').reduce((s, i) => s + i.quantity, 0)
+  const cuentaFreeDrinks = Math.floor(cuentaBebidasTotal / 5)
+  const cuentaDiscount = cuentaFreeDrinks * 1.50
+  const cuentaHasClient = cuentaOrders.some((o) => o.clientId !== null)
+  const cuentaFinalDiscount = cuentaHasClient ? cuentaDiscount : 0
+  const cuentaTotal = Math.max(0, cuentaSubtotal - cuentaFinalDiscount)
 
   // Filter products by active category and search
   const filteredProducts = products.filter((p) => {
@@ -568,7 +635,7 @@ function CamareroTab() {
                 key={cat}
                 variant={activeCategory === cat ? 'default' : 'outline'}
                 size="sm"
-                className={`h-10 shrink-0 ${activeCategory === cat ? 'bg-amber-600 hover:bg-amber-700 text-white' : ''}`}
+                className={`h-11 shrink-0 ${activeCategory === cat ? 'bg-amber-600 hover:bg-amber-700 text-white' : ''}`}
                 onClick={() => setActiveCategory(cat)}
               >
                 {cfg.icon}
@@ -583,13 +650,13 @@ function CamareroTab() {
           {filteredProducts.length === 0 ? (
             <p className="text-center text-muted-foreground py-8">No hay productos en esta categoría</p>
           ) : (
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
               {filteredProducts.map((product) => {
                 const inOrder = currentOrderItems.find((i) => i.productId === product.id)
                 return (
                   <button
                     key={product.id}
-                    className="relative flex flex-col items-center justify-center p-4 rounded-xl border-2 bg-white hover:bg-amber-50 hover:border-amber-400 transition-all min-h-[100px] active:scale-95"
+                    className="relative flex flex-col items-center justify-center p-4 rounded-xl border-2 bg-white hover:bg-amber-50 hover:border-amber-400 transition-all min-h-[90px] sm:min-h-[100px] active:scale-95"
                     onClick={() => handleAddProduct(product)}
                   >
                     {inOrder && (
@@ -653,12 +720,12 @@ function CamareroTab() {
                 <span className="text-sm text-muted-foreground">{currentOrderItems.length} items</span>
                 <span className="ml-3 text-xl font-bold text-amber-800">{formatEUR(currentTotal)}</span>
               </div>
-              <div className="flex gap-2">
-                <Button variant="outline" className="h-12" onClick={() => { clearOrderItems() }}>
+              <div className="flex flex-col sm:flex-row gap-2">
+                <Button variant="outline" className="h-12 sm:flex-1" onClick={() => { clearOrderItems() }}>
                   Limpiar
                 </Button>
                 <Button
-                  className="h-12 bg-amber-600 hover:bg-amber-700 text-white text-base font-bold px-6"
+                  className="h-14 sm:h-12 bg-amber-600 hover:bg-amber-700 text-white text-base font-bold px-6 sm:flex-1"
                   onClick={handleEnviarCocina}
                   disabled={sending}
                 >
@@ -673,15 +740,140 @@ function CamareroTab() {
     )
   }
 
+  // ─── Cuenta View ───────────────────────────────────────────
+  if (view === 'cuenta' && cuentaTable) {
+    return (
+      <div className="flex flex-col min-h-[calc(100vh-10rem)]">
+        {/* Header */}
+        <div className="flex items-center gap-3 pb-3 border-b">
+          <Button variant="outline" size="sm" className="h-12" onClick={() => { setView('tables'); setCuentaTable(null); setCuentaOrders([]) }}>
+            <ArrowLeft className="size-5" />
+          </Button>
+          <div className="flex items-center gap-2">
+            <div className="flex size-10 items-center justify-center rounded-lg bg-amber-100 text-amber-800 font-bold text-lg">
+              {cuentaTable.number}
+            </div>
+            <div>
+              <p className="font-bold text-lg">Mesa {cuentaTable.number}</p>
+              <p className="text-xs text-muted-foreground">{zoneConfig[cuentaTable.zone]?.label ?? cuentaTable.zone}</p>
+            </div>
+          </div>
+          <Euro className="size-6 ml-auto text-amber-600" />
+        </div>
+
+        {/* Orders list */}
+        <div className="flex-1 overflow-y-auto p-3 space-y-3">
+          {cuentaLoading ? (
+            <div className="flex items-center justify-center py-12">
+              <div className="flex items-center gap-2 text-amber-600">
+                <Receipt className="size-6 animate-pulse" />
+                <span>Cargando cuenta...</span>
+              </div>
+            </div>
+          ) : cuentaOrders.length === 0 ? (
+            <div className="text-center py-12 text-muted-foreground">
+              <Receipt className="size-12 mx-auto mb-3 opacity-30" />
+              <p>No hay pedidos activos para esta mesa</p>
+            </div>
+          ) : (
+            cuentaOrders.map((order) => (
+              <Card key={order.id} className="rounded-xl">
+                <CardContent className="p-3">
+                  <div className="flex items-center justify-between mb-2">
+                    <Badge
+                      variant="outline"
+                      className={
+                        order.status === 'ready'
+                          ? 'bg-green-100 text-green-800 border-green-200'
+                          : order.status === 'pending'
+                          ? 'bg-amber-100 text-amber-800 border-amber-200'
+                          : 'bg-orange-100 text-orange-800 border-orange-200'
+                      }
+                    >
+                      {order.status === 'ready' ? '✅ Listo' : order.status === 'pending' ? '⏳ Pendiente' : '🔥 En curso'}
+                    </Badge>
+                    <span className="text-xs text-muted-foreground">{formatTime(order.createdAt)}</span>
+                  </div>
+                  <div className="space-y-1">
+                    {order.items.map((item) => (
+                      <div key={item.id} className="flex justify-between text-sm">
+                        <span><span className="font-medium">{item.quantity}x</span> {item.product?.name ?? 'Producto'}</span>
+                        <span className="text-muted-foreground">{formatEUR(item.subtotal)}</span>
+                      </div>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+            ))
+          )}
+        </div>
+
+        {/* Payment section - fixed at bottom */}
+        {cuentaOrders.length > 0 && (
+          <div className="border-t bg-white p-4 shadow-lg">
+            {/* 5ª gratis notice */}
+            {cuentaHasClient && cuentaFreeDrinks > 0 && (
+              <div className="flex justify-between text-sm text-green-700 mb-2">
+                <span><Beer className="size-3 inline mr-1" />5ª GRATIS: {cuentaFreeDrinks} bebida{cuentaFreeDrinks > 1 ? 's' : ''} gratis</span>
+                <span>-{formatEUR(cuentaFinalDiscount)}</span>
+              </div>
+            )}
+            
+            <div className="flex justify-between text-xl font-bold mb-3">
+              <span>Total</span>
+              <span className="text-amber-700">{formatEUR(cuentaTotal)}</span>
+            </div>
+
+            <div className="flex gap-2 mb-3">
+              <Button
+                variant={paymentMethod === 'efectivo' ? 'default' : 'outline'}
+                className={`flex-1 h-14 text-base font-semibold ${paymentMethod === 'efectivo' ? 'bg-green-600 hover:bg-green-700 text-white' : ''}`}
+                onClick={() => setPaymentMethod('efectivo')}
+              >
+                <Euro className="size-5 mr-2" />
+                Efectivo
+              </Button>
+              <Button
+                variant={paymentMethod === 'tarjeta' ? 'default' : 'outline'}
+                className={`flex-1 h-14 text-base font-semibold ${paymentMethod === 'tarjeta' ? 'bg-amber-600 hover:bg-amber-700 text-white' : ''}`}
+                onClick={() => setPaymentMethod('tarjeta')}
+              >
+                <CreditCard className="size-5 mr-2" />
+                Tarjeta
+              </Button>
+            </div>
+
+            <Button
+              className="w-full h-16 text-xl font-bold bg-green-600 hover:bg-green-700 text-white"
+              onClick={handleCobrar}
+              disabled={paying || cuentaOrders.length === 0}
+            >
+              <Euro className="size-6 mr-2" />
+              {paying ? 'Cobrando...' : 'COBRAR'}
+            </Button>
+          </div>
+        )}
+      </div>
+    )
+  }
+
   // ─── Table Selection View ────────────────────────────────────
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-2">
         <h2 className="text-2xl font-bold tracking-tight">Camarero</h2>
-        <Button variant="outline" size="sm" className="h-10" onClick={fetchTables}>
-          <ShoppingCart className="size-4 mr-1" />
-          Actualizar
-        </Button>
+        <div className="flex items-center gap-2">
+          {currentOrderItems.length > 0 && (
+            <Badge className="bg-amber-600 text-white text-sm">
+              <ShoppingCart className="size-3 mr-1" />
+              {currentOrderItems.length} items · {formatEUR(currentTotal)}
+            </Badge>
+          )}
+          <Button variant="outline" size="sm" className="h-10" onClick={fetchTables}>
+            <ShoppingCart className="size-4 mr-1" />
+            Actualizar
+          </Button>
+        </div>
       </div>
 
       {tablesByZone.length === 0 ? (
@@ -722,6 +914,14 @@ function CamareroTab() {
                       {isAvailable ? '🟢 Libre' : isOccupied ? '🔴 Ocupada' : isReserved ? '🟡 Reservada' : table.status}
                     </span>
                     <span className="text-xs text-muted-foreground">{table.capacity} pax</span>
+                    {isOccupied && (
+                      <button
+                        className="mt-1 px-3 py-1 bg-amber-600 text-white text-xs font-bold rounded-full active:scale-95"
+                        onClick={(e) => { e.stopPropagation(); handlePedirCuenta(table) }}
+                      >
+                        <Euro className="size-3 inline mr-0.5" /> Cuenta
+                      </button>
+                    )}
                   </button>
                 )
               })}
@@ -744,7 +944,7 @@ function CocinaTab() {
 
   const fetchOrders = useCallback(async () => {
     try {
-      const res = await fetch('/api/orders?status=pending,in_progress', { headers: authHeaders(false) })
+      const res = await fetch('/api/orders?status=pending,in_progress&destination=kitchen', { headers: authHeaders(false) })
       if (handleFetchResponse(res) && res.ok) {
         const json = await res.json()
         setOrders(json.orders)
@@ -937,6 +1137,172 @@ function CocinaTab() {
               >
                 <CheckCircle className="size-6 mr-2" />
                 TERMINAR
+              </Button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─── BARRA TAB (Bar drinks) ──────────────────────────────────────────────────
+
+function BarraTab() {
+  const [orders, setOrders] = useState<Order[]>([])
+  const [loading, setLoading] = useState(true)
+  const [finishing, setFinishing] = useState<string | null>(null)
+  const { authHeaders, handleFetchResponse } = useAuth()
+
+  const fetchOrders = useCallback(async () => {
+    try {
+      const res = await fetch('/api/orders?status=pending,in_progress&destination=bar', { headers: authHeaders(false) })
+      if (handleFetchResponse(res) && res.ok) {
+        const json = await res.json()
+        setOrders(json.orders)
+      }
+    } catch { /* silently fail */ } finally {
+      setLoading(false)
+    }
+  }, [authHeaders, handleFetchResponse])
+
+  useEffect(() => {
+    fetchOrders()
+    const interval = setInterval(fetchOrders, 5000)
+    return () => clearInterval(interval)
+  }, [fetchOrders])
+
+  const handleListo = async (order: Order) => {
+    setFinishing(order.id)
+    try {
+      if (order.status === 'pending') {
+        const preRes = await fetch(`/api/orders/${order.id}`, {
+          method: 'PUT',
+          headers: authHeaders(),
+          body: JSON.stringify({ status: 'in_progress' }),
+        })
+        handleFetchResponse(preRes)
+      }
+
+      const res = await fetch(`/api/orders/${order.id}`, {
+        method: 'PUT',
+        headers: authHeaders(),
+        body: JSON.stringify({ status: 'ready' }),
+      })
+
+      if (handleFetchResponse(res) && res.ok) {
+        toast.success(`Mesa ${order.table?.number ?? '?'} — Bebidas listas`)
+        setOrders((prev) => prev.filter((o) => o.id !== order.id))
+      } else {
+        const err = await res.json()
+        toast.error(err.error || 'Error al actualizar pedido')
+      }
+    } catch {
+      toast.error('Error de red')
+    } finally {
+      setFinishing(null)
+    }
+  }
+
+  const sortedOrders = [...orders].sort((a, b) => {
+    if (a.status === 'pending' && b.status !== 'pending') return -1
+    if (a.status !== 'pending' && b.status === 'pending') return 1
+    return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+  })
+
+  if (loading) {
+    return (
+      <div className="bg-amber-50 rounded-xl p-6 min-h-[60vh] flex items-center justify-center">
+        <div className="flex items-center gap-3 text-amber-500">
+          <Beer className="size-8 animate-pulse" />
+          <span className="text-xl">Cargando bebidas...</span>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="bg-amber-50 rounded-xl p-4 min-h-[calc(100vh-10rem)]">
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-3">
+          <Wine className="size-8 text-amber-600" />
+          <h2 className="text-2xl font-bold text-amber-900">Barra</h2>
+          <Badge className="bg-amber-600 text-white text-sm">{orders.length} pedidos</Badge>
+        </div>
+        <Button variant="outline" size="sm" className="h-10" onClick={fetchOrders}>
+          <ShoppingCart className="size-4 mr-1" />
+          Actualizar
+        </Button>
+      </div>
+
+      {sortedOrders.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-20 text-amber-400">
+          <CheckCheck className="size-16 mb-4" />
+          <p className="text-xl font-medium">¡Todo listo!</p>
+          <p className="text-sm mt-1">No hay bebidas pendientes</p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+          {sortedOrders.map((order) => (
+            <div
+              key={order.id}
+              className={`bg-white rounded-xl p-4 border-l-4 transition-all shadow-sm ${
+                order.status === 'pending' ? 'border-l-amber-500' : 'border-l-orange-500'
+              } ${finishing === order.id ? 'opacity-50 scale-95' : ''}`}
+            >
+              <div className="flex items-start justify-between mb-3">
+                <div>
+                  <p className="text-3xl font-bold text-amber-900">Mesa {order.table?.number ?? '?'}</p>
+                  <p className="text-sm text-amber-600">{zoneConfig[order.table?.zone]?.label ?? order.table?.zone}</p>
+                </div>
+                <div className="text-right">
+                  <p className="text-sm text-amber-600">{formatTime(order.createdAt)}</p>
+                  <p className={`text-lg font-bold ${elapsedColor(order.createdAt)}`}>
+                    <Timer className="size-4 inline mr-1" />
+                    {timeAgo(order.createdAt)}
+                  </p>
+                </div>
+              </div>
+
+              <Badge
+                className={`mb-3 ${
+                  order.status === 'pending'
+                    ? 'bg-amber-100 text-amber-800 border-amber-200'
+                    : 'bg-orange-100 text-orange-800 border-orange-200'
+                }`}
+                variant="outline"
+              >
+                {order.status === 'pending' ? '⏳ Pendiente' : '🔥 Preparando'}
+              </Badge>
+
+              <div className="space-y-1 mb-4">
+                {order.items.map((item) => (
+                  <div key={item.id} className="flex items-start gap-2 text-amber-900">
+                    <span className="flex size-6 items-center justify-center rounded bg-amber-200 text-amber-800 text-xs font-bold shrink-0">
+                      {item.quantity}
+                    </span>
+                    <span className="text-sm leading-tight">{item.product?.name ?? 'Bebida'}</span>
+                    {item.notes && (
+                      <span className="text-xs text-amber-500 ml-1">({item.notes})</span>
+                    )}
+                  </div>
+                ))}
+              </div>
+
+              {order.client && (
+                <p className="text-xs text-amber-500 mb-3">
+                  <UserCircle className="size-3 inline mr-1" />
+                  {order.client.name}
+                </p>
+              )}
+
+              <Button
+                className="w-full h-14 text-lg font-bold bg-amber-600 hover:bg-amber-700 text-white"
+                onClick={() => handleListo(order)}
+                disabled={finishing === order.id}
+              >
+                <CheckCircle className="size-6 mr-2" />
+                LISTO
               </Button>
             </div>
           ))}
@@ -1554,7 +1920,7 @@ function CajaTab() {
 
 function ReportesTab() {
   const { authHeaders, handleFetchResponse } = useAuth()
-  const [reportType, setReportType] = useState<'daily_sales' | 'payment_methods' | 'top_products' | 'cancelled_orders' | 'cash_closes'>('daily_sales')
+  const [reportType, setReportType] = useState<'daily_sales' | 'payment_methods' | 'top_products' | 'cancelled_orders' | 'cash_closes' | 'sales_by_user' | 'bar_orders' | 'kitchen_orders'>('daily_sales')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
   const [reportData, setReportData] = useState<any>(null)
@@ -1586,6 +1952,9 @@ function ReportesTab() {
     { value: 'top_products' as const, label: 'Productos más vendidos' },
     { value: 'cancelled_orders' as const, label: 'Pedidos cancelados' },
     { value: 'cash_closes' as const, label: 'Cierres de caja' },
+    { value: 'sales_by_user' as const, label: 'Ventas por camarero' },
+    { value: 'bar_orders' as const, label: 'Comandas barra' },
+    { value: 'kitchen_orders' as const, label: 'Comandas cocina' },
   ]
 
   return (
@@ -1825,6 +2194,94 @@ function ReportesTab() {
                 )}
               </CardContent>
             </Card>
+          )}
+
+          {/* Sales by User */}
+          {reportType === 'sales_by_user' && (
+            <Card className="rounded-xl">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Users className="size-5" />
+                  Ventas por camarero
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                {reportData.users && reportData.users.length > 0 ? (
+                  <div className="space-y-2">
+                    {reportData.users.map((u: any, i: number) => (
+                      <div key={i} className="flex items-center justify-between p-3 bg-amber-50 rounded-lg">
+                        <div className="flex items-center gap-3">
+                          <span className="flex size-8 items-center justify-center rounded-full bg-amber-600 text-white text-sm font-bold">
+                            {i + 1}
+                          </span>
+                          <div>
+                            <p className="font-semibold">{u.userName}</p>
+                            <p className="text-xs text-muted-foreground">{u.totalOrders} pedidos</p>
+                          </div>
+                        </div>
+                        <span className="font-bold text-amber-700">{formatEUR(u.totalRevenue)}</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-muted-foreground text-center py-8">No hay datos</p>
+                )}
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Bar Orders */}
+          {reportType === 'bar_orders' && (
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <Card className="rounded-xl">
+                <CardContent className="p-6 text-center">
+                  <Beer className="size-10 mx-auto mb-2 text-amber-600" />
+                  <p className="text-sm text-muted-foreground">Bebidas servidas</p>
+                  <p className="text-3xl font-bold text-amber-700">{reportData.totalItems ?? 0}</p>
+                </CardContent>
+              </Card>
+              <Card className="rounded-xl">
+                <CardContent className="p-6 text-center">
+                  <Euro className="size-10 mx-auto mb-2 text-green-600" />
+                  <p className="text-sm text-muted-foreground">Ingresos barra</p>
+                  <p className="text-3xl font-bold text-green-700">{formatEUR(reportData.totalRevenue ?? 0)}</p>
+                </CardContent>
+              </Card>
+              <Card className="rounded-xl">
+                <CardContent className="p-6 text-center">
+                  <Receipt className="size-10 mx-auto mb-2 text-amber-600" />
+                  <p className="text-sm text-muted-foreground">Comandas</p>
+                  <p className="text-3xl font-bold text-amber-700">{reportData.orders ?? 0}</p>
+                </CardContent>
+              </Card>
+            </div>
+          )}
+
+          {/* Kitchen Orders */}
+          {reportType === 'kitchen_orders' && (
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <Card className="rounded-xl">
+                <CardContent className="p-6 text-center">
+                  <ChefHat className="size-10 mx-auto mb-2 text-orange-600" />
+                  <p className="text-sm text-muted-foreground">Platos servidos</p>
+                  <p className="text-3xl font-bold text-orange-700">{reportData.totalItems ?? 0}</p>
+                </CardContent>
+              </Card>
+              <Card className="rounded-xl">
+                <CardContent className="p-6 text-center">
+                  <Euro className="size-10 mx-auto mb-2 text-green-600" />
+                  <p className="text-sm text-muted-foreground">Ingresos cocina</p>
+                  <p className="text-3xl font-bold text-green-700">{formatEUR(reportData.totalRevenue ?? 0)}</p>
+                </CardContent>
+              </Card>
+              <Card className="rounded-xl">
+                <CardContent className="p-6 text-center">
+                  <Receipt className="size-10 mx-auto mb-2 text-orange-600" />
+                  <p className="text-sm text-muted-foreground">Comandas</p>
+                  <p className="text-3xl font-bold text-orange-700">{reportData.orders ?? 0}</p>
+                </CardContent>
+              </Card>
+            </div>
           )}
         </>
       )}
@@ -3145,6 +3602,8 @@ function UsersTab({ overrideRestaurantId }: { overrideRestaurantId?: string } = 
   const [formActive, setFormActive] = useState(true)
   const [creating, setCreating] = useState(false)
   const [resetting, setResetting] = useState(false)
+  const [deleteTarget, setDeleteTarget] = useState<UserItem | null>(null)
+  const [deleteLoading, setDeleteLoading] = useState(false)
 
   const canCreate = currentUser && clientHasPermission(currentUser.role, 'users:create')
   const canUpdate = currentUser && clientHasPermission(currentUser.role, 'users:update')
@@ -3263,6 +3722,32 @@ function UsersTab({ overrideRestaurantId }: { overrideRestaurantId?: string } = 
     }
   }
 
+  const handleDeleteUser = async () => {
+    if (!deleteTarget) return
+    setDeleteLoading(true)
+    try {
+      const headers = authHeaders()
+      if (overrideRestaurantId) headers['X-Restaurant-Id'] = overrideRestaurantId
+      const res = await fetch(`/api/users/${deleteTarget.id}`, {
+        method: 'DELETE',
+        headers,
+      })
+      if (handleFetchResponse(res) && res.ok) {
+        const data = await res.json()
+        toast.success(data.deleted ? 'Usuario eliminado permanentemente' : 'Usuario desactivado (tiene datos relacionados)')
+        setDeleteTarget(null)
+        fetchUsers()
+      } else {
+        const err = await res.json()
+        toast.error(err.error || 'Error al eliminar usuario')
+      }
+    } catch {
+      toast.error('Error de red')
+    } finally {
+      setDeleteLoading(false)
+    }
+  }
+
   const filteredUsers = users.filter((u) => {
     if (!searchQuery) return true
     const q = searchQuery.toLowerCase()
@@ -3333,6 +3818,17 @@ function UsersTab({ overrideRestaurantId }: { overrideRestaurantId?: string } = 
                       title="Restablecer contraseña"
                     >
                       <Lock className="size-4 text-muted-foreground" />
+                    </Button>
+                  )}
+                  {canDelete && user.id !== currentUser?.userId && user.role !== 'super_admin' && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="size-8 p-0"
+                      onClick={() => setDeleteTarget(user)}
+                      title="Eliminar usuario"
+                    >
+                      <Trash2 className="size-4 text-red-400" />
                     </Button>
                   )}
                 </div>
@@ -3458,6 +3954,34 @@ function UsersTab({ overrideRestaurantId }: { overrideRestaurantId?: string } = 
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Delete User Confirmation */}
+      <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Eliminar usuario</AlertDialogTitle>
+            <AlertDialogDescription>
+              {deleteTarget && (
+                <>
+                  ¿Estás seguro de que deseas eliminar a <strong>{deleteTarget.name}</strong> (@{deleteTarget.username})?
+                  <br /><br />
+                  Si el usuario tiene pedidos o pagos asociados, será desactivado en lugar de eliminado.
+                </>
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleteLoading}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDeleteUser}
+              disabled={deleteLoading}
+              className="bg-red-600 hover:bg-red-700 text-white"
+            >
+              {deleteLoading ? 'Eliminando...' : 'Eliminar'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }
@@ -4667,6 +5191,7 @@ export default function RestaurantPage() {
 
   const mainTabs = [
     { id: 'camarero' as TabId, label: 'Camarero', icon: <Utensils className="size-4" /> },
+    { id: 'barra' as TabId, label: 'Barra', icon: <Wine className="size-4" /> },
     { id: 'cocina' as TabId, label: 'Cocina', icon: <ChefHat className="size-4" /> },
     { id: 'caja' as TabId, label: 'Caja', icon: <CreditCard className="size-4" /> },
   ]
@@ -4676,6 +5201,7 @@ export default function RestaurantPage() {
     if (!currentUser) return false
     switch (tab.id) {
       case 'camarero': return clientHasPermission(currentUser.role, 'orders:create')
+      case 'barra': return clientHasPermission(currentUser.role, 'orders:read')
       case 'cocina': return clientHasPermission(currentUser.role, 'orders:update')
       case 'caja': return clientHasPermission(currentUser.role, 'orders:pay') || clientHasPermission(currentUser.role, 'cash:read')
       default: return true
@@ -4906,6 +5432,10 @@ export default function RestaurantPage() {
 
               <TabsContent value="camarero" className="mt-0">
                 <CamareroTab />
+              </TabsContent>
+
+              <TabsContent value="barra" className="mt-0">
+                <BarraTab />
               </TabsContent>
 
               <TabsContent value="cocina" className="mt-0">

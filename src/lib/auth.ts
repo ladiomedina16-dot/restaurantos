@@ -136,7 +136,7 @@ export const ROLE_PERMISSIONS: Record<UserRole, string[]> = {
     'audit:read',
   ],
   camarero: [
-    'orders:read', 'orders:create',
+    'orders:read', 'orders:create', 'orders:pay',
     'products:read',
     'tables:read',
     'clients:read', 'clients:create',
@@ -170,7 +170,7 @@ export function canAccessTab(role: UserRole, tab: string): boolean {
     case 'cocina':
       return ['super_admin', 'admin', 'encargado', 'cocina'].includes(role)
     case 'caja':
-      return ['super_admin', 'admin', 'encargado', 'caja'].includes(role)
+      return ['super_admin', 'admin', 'encargado', 'caja', 'camarero'].includes(role)
     case 'reportes':
       return ['super_admin', 'admin', 'encargado'].includes(role)
     case 'dashboard':

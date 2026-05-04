@@ -52,6 +52,12 @@ export async function GET(request: Request) {
         return await cancelledOrdersReport(restaurantId, dateFromParsed, dateToParsed)
       case 'cash_closes':
         return await cashClosesReport(restaurantId, dateFromParsed, dateToParsed)
+      case 'sales_by_user':
+        return await salesByUserReport(restaurantId, dateFromParsed, dateToParsed)
+      case 'bar_orders':
+        return await barOrdersReport(restaurantId, dateFromParsed, dateToParsed)
+      case 'kitchen_orders':
+        return await kitchenOrdersReport(restaurantId, dateFromParsed, dateToParsed)
       default:
         return Response.json({ error: 'Tipo de reporte no válido' }, { status: 400 })
     }
@@ -303,4 +309,125 @@ async function cashClosesReport(restaurantId: string, dateFrom: Date, dateTo: Da
   }))
 
   return Response.json({ report })
+}
+
+// ─── sales_by_user ──────────────────────────────────────────
+// Total sales grouped by user (camarero who created the order)
+async function salesByUserReport(restaurantId: string, dateFrom: Date, dateTo: Date) {
+  const orders = await db.order.findMany({
+    where: {
+      restaurantId,
+      status: { notIn: ['cancelled'] },
+      createdAt: {
+        gte: dateFrom,
+        lt: dateTo,
+      },
+    },
+    select: {
+      createdById: true,
+      createdBy: {
+        select: { name: true, username: true },
+      },
+      total: true,
+    },
+  })
+
+  const userMap = new Map<string, { userName: string; totalOrders: number; totalRevenue: number }>()
+
+  for (const order of orders) {
+    const userId = order.createdById ?? 'unknown'
+    const existing = userMap.get(userId)
+    if (existing) {
+      existing.totalOrders += 1
+      existing.totalRevenue += order.total
+    } else {
+      const userName = order.createdBy
+        ? (order.createdBy.name || order.createdBy.username)
+        : 'Desconocido'
+      userMap.set(userId, { userName, totalOrders: 1, totalRevenue: order.total })
+    }
+  }
+
+  const report = Array.from(userMap.entries()).map(([userId, data]) => ({
+    userId,
+    userName: data.userName,
+    totalOrders: data.totalOrders,
+    totalRevenue: Math.round(data.totalRevenue * 100) / 100,
+  }))
+
+  return Response.json({ report })
+}
+
+// ─── bar_orders ──────────────────────────────────────────────
+// Count and revenue of bar items (bebidas) in date range
+async function barOrdersReport(restaurantId: string, dateFrom: Date, dateTo: Date) {
+  const items = await db.orderItem.findMany({
+    where: {
+      order: {
+        restaurantId,
+        status: { notIn: ['cancelled'] },
+        createdAt: {
+          gte: dateFrom,
+          lt: dateTo,
+        },
+      },
+      product: {
+        category: 'bebida',
+      },
+    },
+    select: {
+      quantity: true,
+      subtotal: true,
+      orderId: true,
+    },
+  })
+
+  const totalItems = items.reduce((sum, item) => sum + item.quantity, 0)
+  const totalRevenue = Math.round(items.reduce((sum, item) => sum + item.subtotal, 0) * 100) / 100
+  const orderIds = new Set(items.map((item) => item.orderId))
+
+  return Response.json({
+    report: {
+      totalItems,
+      totalRevenue,
+      orders: orderIds.size,
+    },
+  })
+}
+
+// ─── kitchen_orders ──────────────────────────────────────────
+// Count and revenue of kitchen items (non-bebida) in date range
+async function kitchenOrdersReport(restaurantId: string, dateFrom: Date, dateTo: Date) {
+  const items = await db.orderItem.findMany({
+    where: {
+      order: {
+        restaurantId,
+        status: { notIn: ['cancelled'] },
+        createdAt: {
+          gte: dateFrom,
+          lt: dateTo,
+        },
+      },
+      product: {
+        category: { not: 'bebida' },
+      },
+    },
+    select: {
+      quantity: true,
+      subtotal: true,
+      orderId: true,
+    },
+  })
+
+  const totalItems = items.reduce((sum, item) => sum + item.quantity, 0)
+  const totalRevenue = Math.round(items.reduce((sum, item) => sum + item.subtotal, 0) * 100) / 100
+  const orderIds = new Set(items.map((item) => item.orderId))
+
+  return Response.json({
+    report: {
+      totalItems,
+      totalRevenue,
+      orders: orderIds.size,
+    },
+  })
 }

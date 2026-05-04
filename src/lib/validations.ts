@@ -147,7 +147,7 @@ export const closeCashSessionSchema = z.object({
 // ─── Reports ───────────────────────────────────────────────
 
 export const reportsQuerySchema = z.object({
-  type: z.enum(['daily_sales', 'payment_methods', 'top_products', 'cancelled_orders', 'cash_closes']),
+  type: z.enum(['daily_sales', 'payment_methods', 'top_products', 'cancelled_orders', 'cash_closes', 'sales_by_user', 'bar_orders', 'kitchen_orders']),
   dateFrom: z.string().optional(),
   dateTo: z.string().optional(),
 })
@@ -175,13 +175,13 @@ export const resetPasswordSchema = z.object({
 // ─── Onboarding ────────────────────────────────────────────
 
 export const onboardingSchema = z.object({
-  restaurantName: z.string().min(1, 'El nombre del restaurante es obligatorio').max(100),
-  slug: z.string().min(1, 'El slug es obligatorio').max(50).regex(/^[a-z0-9-]+$/, 'Solo minúsculas, números y guiones'),
+  restaurantName: z.string().min(1, 'Nombre obligatorio').max(100),
+  slug: z.string().min(1).max(50).regex(/^[a-z0-9-]+$/, 'Solo minúsculas, números y guiones'),
   address: z.string().max(200).optional().default(''),
   phone: z.string().max(20).optional().default(''),
-  adminName: z.string().min(1, 'El nombre del administrador es obligatorio').max(100),
   adminUsername: z.string().min(3, 'Mínimo 3 caracteres').max(30),
   adminPassword: z.string().min(6, 'Mínimo 6 caracteres').max(100),
+  adminName: z.string().max(100).optional().default(''),
 })
 
 // ─── Update Restaurant (with subscriptionStatus) ───────────
