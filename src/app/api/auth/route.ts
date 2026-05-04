@@ -109,7 +109,8 @@ export async function POST(request: Request) {
 
     const { username, password } = validation.data
 
-    const user = await db.user.findUnique({ where: { username } })
+    // findFirst instead of findUnique: works with both @unique and @@unique([username, restaurantId])
+    const user = await db.user.findFirst({ where: { username } })
 
     if (!user) {
       return NextResponse.json(

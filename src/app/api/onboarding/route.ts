@@ -12,6 +12,7 @@ import { authenticateAndAuthorize, hashPassword } from '@/lib/auth'
 import { validateInput, onboardingSchema } from '@/lib/validations'
 import { handleApiError } from '@/lib/errors'
 import { createAuditLog } from '@/lib/audit'
+import { BASE_PRODUCTS } from '@/lib/base-products'
 
 export async function POST(request: Request) {
   // Only super_admin can onboard new restaurants
@@ -45,7 +46,7 @@ export async function POST(request: Request) {
     }
 
     // Check if admin username already exists
-    const existingUser = await db.user.findUnique({ where: { username: adminUsername } })
+    const existingUser = await db.user.findFirst({ where: { username: adminUsername } })
     if (existingUser) {
       return NextResponse.json(
         { error: 'El nombre de usuario ya existe.' },
@@ -91,6 +92,20 @@ export async function POST(request: Request) {
           createdAt: true,
         },
       })
+
+      // Copy BASE_PRODUCTS to the new restaurant
+      for (const p of BASE_PRODUCTS) {
+        await tx.product.create({
+          data: {
+            name: p.name,
+            description: p.description,
+            price: p.price,
+            category: p.category,
+            stock: p.stock,
+            restaurantId: restaurant.id,
+          },
+        })
+      }
 
       return { restaurant, user: adminUser }
     })
