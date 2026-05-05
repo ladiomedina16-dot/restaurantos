@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useCallback, useRef, createContext, useContext } from 'react'
+import { useEffect, useState, useCallback, createContext, useContext } from 'react'
 import {
   LayoutDashboard,
   Package,
@@ -3237,14 +3237,21 @@ function SuperAdminPanel() {
         setLoading(true)
         fetchRestaurants()
       } else {
+        // Always show real backend error — never hide it
         let errorMsg = 'Error al eliminar restaurante'
         try {
           const err = await res.json()
-          errorMsg = err.error || err.details || errorMsg
+          // Backend returns: { success, code, message, meta } or { error }
+          errorMsg = err.message || err.error || err.details || errorMsg
+          // Append Prisma code if available for easier debugging
+          if (err.code && err.code !== 'UNKNOWN') {
+            errorMsg += ` (${err.code})`
+          }
         } catch { /* response body not JSON */ }
         toast.error(errorMsg)
       }
     } catch (error) {
+      // Show real error, not generic "Error de red"
       const message = error instanceof Error ? error.message : 'Error de conexión'
       toast.error(message)
     } finally {
@@ -5287,67 +5294,6 @@ export default function RestaurantPage() {
   // ─── SaaS Subscription State ────────────────────────────────
   const [subscriptionSuspended, setSubscriptionSuspended] = useState(false)
 
-  // ─── Inactivity Auto-Close (10 minutes) ─────────────────────
-  const INACTIVITY_MS = 10 * 60 * 1000 // 10 minutes
-  const lastActivityRef = useRef<number>(Date.now())
-
-  // Reset activity timer on user interaction
-  useEffect(() => {
-    if (!authToken) return
-
-    const resetTimer = () => {
-      lastActivityRef.current = Date.now()
-      localStorage.setItem('restaurantos_last_activity', String(Date.now()))
-    }
-
-    // Initialize from stored last activity
-    const stored = localStorage.getItem('restaurantos_last_activity')
-    if (stored) {
-      lastActivityRef.current = parseInt(stored, 10)
-    } else {
-      resetTimer()
-    }
-
-    const events = ['mousedown', 'keydown', 'touchstart', 'scroll', 'click'] as const
-    events.forEach((evt) => window.addEventListener(evt, resetTimer, { passive: true }))
-
-    return () => {
-      events.forEach((evt) => window.removeEventListener(evt, resetTimer))
-    }
-  }, [authToken])
-
-  // Check inactivity every 30 seconds
-  useEffect(() => {
-    if (!authToken) return
-
-    // Check immediately on mount if session should be expired
-    const stored = localStorage.getItem('restaurantos_last_activity')
-    if (stored) {
-      const elapsed = Date.now() - parseInt(stored, 10)
-      if (elapsed >= INACTIVITY_MS) {
-        setAuthToken(null)
-        setCurrentUser(null)
-        localStorage.removeItem('restaurantos_auth')
-        localStorage.removeItem('restaurantos_last_activity')
-        toast.error('Sesión cerrada por inactividad (10 min)')
-        return
-      }
-    }
-
-    const checkInterval = setInterval(() => {
-      const elapsed = Date.now() - lastActivityRef.current
-      if (elapsed >= INACTIVITY_MS) {
-        setAuthToken(null)
-        setCurrentUser(null)
-        localStorage.removeItem('restaurantos_auth')
-        localStorage.removeItem('restaurantos_last_activity')
-        toast.error('Sesión cerrada por inactividad (10 min)')
-      }
-    }, 30_000)
-
-    return () => clearInterval(checkInterval)
-  }, [authToken, INACTIVITY_MS])
-
   // Load auth from localStorage on mount
   useEffect(() => {
     const saved = localStorage.getItem('restaurantos_auth')
@@ -5414,7 +5360,6 @@ export default function RestaurantPage() {
       setAuthToken(null)
       setCurrentUser(null)
       localStorage.removeItem('restaurantos_auth')
-      localStorage.removeItem('restaurantos_last_activity')
       toast.error('Sesión expirada')
       return false
     }
@@ -5425,7 +5370,6 @@ export default function RestaurantPage() {
     setAuthToken(null)
     setCurrentUser(null)
     localStorage.removeItem('restaurantos_auth')
-    localStorage.removeItem('restaurantos_last_activity')
   }, [])
 
   const handleLogin = async (e: React.FormEvent) => {
