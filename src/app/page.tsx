@@ -104,9 +104,9 @@ const CLIENT_ROLE_PERMISSIONS: Record<string, string[]> = {
   super_admin: ['*'],
   admin: ['orders:read', 'orders:create', 'orders:update', 'orders:pay', 'products:read', 'products:create', 'products:update', 'products:delete', 'tables:read', 'tables:create', 'tables:update', 'tables:delete', 'clients:read', 'clients:create', 'clients:update', 'clients:delete', 'users:read', 'users:create', 'users:update', 'users:delete', 'payments:read', 'dashboard:read', 'cash:read', 'cash:open', 'cash:close', 'print:read', 'audit:read'],
   encargado: ['orders:read', 'orders:create', 'orders:update', 'orders:pay', 'products:read', 'products:update', 'tables:read', 'tables:update', 'clients:read', 'clients:create', 'clients:update', 'users:read', 'payments:read', 'dashboard:read', 'cash:read', 'cash:open', 'cash:close', 'print:read', 'audit:read'],
-  camarero: ['orders:read', 'orders:create', 'orders:pay', 'products:read', 'tables:read', 'clients:read', 'clients:create'],
+  camarero: ['orders:read', 'orders:create', 'orders:update', 'orders:pay', 'products:read', 'tables:read', 'clients:read', 'clients:create'],
   cocina: ['orders:read', 'orders:update', 'products:read'],
-  caja: ['orders:read', 'orders:pay', 'products:read', 'tables:read', 'clients:read', 'payments:read', 'cash:read', 'cash:open', 'cash:close', 'print:read'],
+  caja: ['orders:read', 'orders:update', 'orders:pay', 'products:read', 'tables:read', 'clients:read', 'payments:read', 'cash:read', 'cash:open', 'cash:close', 'print:read'],
 }
 
 function clientHasPermission(role: string, permission: string): boolean {
@@ -494,6 +494,31 @@ function CamareroTab() {
     setView('cuenta')
   }
 
+  const handleCancelOrder = async (orderId: string) => {
+    try {
+      const res = await fetch(`/api/orders/${orderId}`, {
+        method: 'PUT',
+        headers: authHeaders(),
+        body: JSON.stringify({ status: 'cancelled' }),
+      })
+      if (handleFetchResponse(res) && res.ok) {
+        toast.success('Pedido cancelado')
+        if (cuentaTable) fetchCuentaOrders(cuentaTable.id)
+        fetchTables()
+      } else {
+        let errorMsg = 'Error al cancelar pedido'
+        try {
+          const err = await res.json()
+          errorMsg = err.error || errorMsg
+        } catch { /* not JSON */ }
+        toast.error(errorMsg)
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Error de conexión'
+      toast.error(msg)
+    }
+  }
+
   const handleCobrar = async () => {
     if (!cuentaTable || cuentaOrders.length === 0) return
     setPaying(true)
@@ -822,7 +847,18 @@ function CamareroTab() {
                     >
                       {order.status === 'ready' ? '✅ Listo' : order.status === 'pending' ? '⏳ Pendiente' : '🔥 En curso'}
                     </Badge>
-                    <span className="text-xs text-muted-foreground">{formatTime(order.createdAt)}</span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-muted-foreground">{formatTime(order.createdAt)}</span>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 w-7 p-0 text-red-500 hover:text-red-700 hover:bg-red-50"
+                        onClick={() => handleCancelOrder(order.id)}
+                        title="Cancelar pedido"
+                      >
+                        <XCircle className="size-4" />
+                      </Button>
+                    </div>
                   </div>
                   <div className="space-y-1">
                     {order.items.map((item) => (
@@ -972,9 +1008,8 @@ function CocinaTab() {
   const [orders, setOrders] = useState<Order[]>([])
   const [loading, setLoading] = useState(true)
   const [markingItem, setMarkingItem] = useState<string | null>(null)
-  const [cancellingOrder, setCancellingOrder] = useState<string | null>(null)
   const [now, setNow] = useState(Date.now())
-  const { authHeaders, handleFetchResponse } = useAuth()
+  const { authHeaders, handleFetchResponse, currentUser } = useAuth()
 
   const fetchOrders = useCallback(async () => {
     try {
@@ -1020,6 +1055,13 @@ function CocinaTab() {
         const json = await res.json()
         const orderStatus = json.orderStatus as string
 
+        // If order was cancelled while we were working on it
+        if (orderStatus === 'cancelled') {
+          toast.info(`Mesa ${orders.find((o) => o.id === orderId)?.table?.number ?? '?'} — Pedido cancelado`)
+          setOrders((prev) => prev.filter((o) => o.id !== orderId))
+          return
+        }
+
         // Update local state: mark the item as ready
         setOrders((prev) =>
           prev.map((o) => {
@@ -1045,36 +1087,18 @@ function CocinaTab() {
           }
         }
       } else {
-        const err = await res.json()
-        toast.error(err.error || 'Error al actualizar item')
+        let errorMsg = 'Error al actualizar item'
+        try {
+          const err = await res.json()
+          errorMsg = err.error || errorMsg
+        } catch { /* response not JSON */ }
+        toast.error(errorMsg)
       }
-    } catch {
-      toast.error('Error de red')
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Error de conexión'
+      toast.error(msg)
     } finally {
       setMarkingItem(null)
-    }
-  }
-
-  // Cancel entire order
-  const handleCancelOrder = async (order: Order) => {
-    setCancellingOrder(order.id)
-    try {
-      const res = await fetch(`/api/orders/${order.id}`, {
-        method: 'PUT',
-        headers: authHeaders(),
-        body: JSON.stringify({ status: 'cancelled' }),
-      })
-      if (handleFetchResponse(res) && res.ok) {
-        toast.success(`Mesa ${order.table?.number ?? '?'} — Pedido cancelado`)
-        setOrders((prev) => prev.filter((o) => o.id !== order.id))
-      } else {
-        const err = await res.json()
-        toast.error(err.error || 'Error al cancelar pedido')
-      }
-    } catch {
-      toast.error('Error de red')
-    } finally {
-      setCancellingOrder(null)
     }
   }
 
@@ -1129,7 +1153,7 @@ function CocinaTab() {
               key={order.id}
               className={`bg-gray-800 rounded-xl p-4 border-l-4 transition-all ${
                 order.status === 'pending' ? 'border-l-amber-500' : 'border-l-orange-500'
-              } ${cancellingOrder === order.id ? 'opacity-50 scale-95' : ''}`}
+              }`}
             >
               {/* Card header: Mesa + Time — NO PRICES */}
               <div className="flex items-start justify-between mb-3">
@@ -1194,17 +1218,6 @@ function CocinaTab() {
                   )
                 })}
               </div>
-
-              {/* CANCELAR button */}
-              <Button
-                variant="outline"
-                className="w-full h-10 text-sm font-bold border-red-600/50 text-red-400 hover:bg-red-900/30 hover:text-red-300"
-                onClick={() => handleCancelOrder(order)}
-                disabled={cancellingOrder === order.id}
-              >
-                <XCircle className="size-4 mr-2" />
-                CANCELAR
-              </Button>
             </div>
           ))}
         </div>
@@ -1219,8 +1232,7 @@ function BarraTab() {
   const [orders, setOrders] = useState<Order[]>([])
   const [loading, setLoading] = useState(true)
   const [markingItem, setMarkingItem] = useState<string | null>(null)
-  const [cancellingOrder, setCancellingOrder] = useState<string | null>(null)
-  const { authHeaders, handleFetchResponse } = useAuth()
+  const { authHeaders, handleFetchResponse, currentUser } = useAuth()
 
   const fetchOrders = useCallback(async () => {
     try {
@@ -1259,6 +1271,13 @@ function BarraTab() {
         const json = await res.json()
         const orderStatus = json.orderStatus as string
 
+        // If order was cancelled while we were working on it
+        if (orderStatus === 'cancelled') {
+          toast.info(`Mesa ${orders.find((o) => o.id === orderId)?.table?.number ?? '?'} — Pedido cancelado`)
+          setOrders((prev) => prev.filter((o) => o.id !== orderId))
+          return
+        }
+
         // Update local state: mark the item as ready
         setOrders((prev) =>
           prev.map((o) => {
@@ -1284,36 +1303,18 @@ function BarraTab() {
           }
         }
       } else {
-        const err = await res.json()
-        toast.error(err.error || 'Error al actualizar item')
+        let errorMsg = 'Error al actualizar item'
+        try {
+          const err = await res.json()
+          errorMsg = err.error || errorMsg
+        } catch { /* response not JSON */ }
+        toast.error(errorMsg)
       }
-    } catch {
-      toast.error('Error de red')
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Error de conexión'
+      toast.error(msg)
     } finally {
       setMarkingItem(null)
-    }
-  }
-
-  // Cancel entire order
-  const handleCancelOrder = async (order: Order) => {
-    setCancellingOrder(order.id)
-    try {
-      const res = await fetch(`/api/orders/${order.id}`, {
-        method: 'PUT',
-        headers: authHeaders(),
-        body: JSON.stringify({ status: 'cancelled' }),
-      })
-      if (handleFetchResponse(res) && res.ok) {
-        toast.success(`Mesa ${order.table?.number ?? '?'} — Pedido cancelado`)
-        setOrders((prev) => prev.filter((o) => o.id !== order.id))
-      } else {
-        const err = await res.json()
-        toast.error(err.error || 'Error al cancelar pedido')
-      }
-    } catch {
-      toast.error('Error de red')
-    } finally {
-      setCancellingOrder(null)
     }
   }
 
@@ -1361,7 +1362,7 @@ function BarraTab() {
               key={order.id}
               className={`bg-white rounded-xl p-4 border-l-4 transition-all shadow-sm ${
                 order.status === 'pending' ? 'border-l-amber-500' : 'border-l-orange-500'
-              } ${cancellingOrder === order.id ? 'opacity-50 scale-95' : ''}`}
+              }`}
             >
               <div className="flex items-start justify-between mb-3">
                 <div>
@@ -1425,16 +1426,6 @@ function BarraTab() {
                   {order.client.name}
                 </p>
               )}
-
-              <Button
-                variant="outline"
-                className="w-full h-10 text-sm font-bold border-red-300 text-red-600 hover:bg-red-50 hover:text-red-700"
-                onClick={() => handleCancelOrder(order)}
-                disabled={cancellingOrder === order.id}
-              >
-                <XCircle className="size-4 mr-2" />
-                CANCELAR
-              </Button>
             </div>
           ))}
         </div>
@@ -1461,6 +1452,7 @@ function CajaTab() {
   const [showCloseCashDialog, setShowCloseCashDialog] = useState(false)
   const [openingCashInput, setOpeningCashInput] = useState('')
   const [closingCashInput, setClosingCashInput] = useState('')
+  const [closingCardInput, setClosingCardInput] = useState('')
   const [cashSessionLoading, setCashSessionLoading] = useState(false)
   const [cashCloseSummary, setCashCloseSummary] = useState<any>(null)
   const [supplierPayments, setSupplierPayments] = useState<SupplierPaymentItem[]>([])
@@ -1630,6 +1622,31 @@ function CajaTab() {
     }
   }
 
+  const handleCancelOrder = async (orderId: string) => {
+    try {
+      const res = await fetch(`/api/orders/${orderId}`, {
+        method: 'PUT',
+        headers: authHeaders(),
+        body: JSON.stringify({ status: 'cancelled' }),
+      })
+      if (handleFetchResponse(res) && res.ok) {
+        toast.success('Pedido cancelado')
+        fetchActiveOrders()
+        fetchTables()
+      } else {
+        let errorMsg = 'Error al cancelar pedido'
+        try {
+          const err = await res.json()
+          errorMsg = err.error || errorMsg
+        } catch { /* not JSON */ }
+        toast.error(errorMsg)
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Error de conexión'
+      toast.error(msg)
+    }
+  }
+
   // Group tables by zone
   const tablesByZone = zoneOrder
     .map((z) => ({
@@ -1691,7 +1708,18 @@ function CajaTab() {
                           >
                             {order.status === 'ready' ? '✅ Listo' : order.status === 'pending' ? '⏳ Pendiente' : '🔥 En curso'}
                           </Badge>
-                          <span className="text-xs text-muted-foreground">{formatTime(order.createdAt)}</span>
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs text-muted-foreground">{formatTime(order.createdAt)}</span>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-7 w-7 p-0 text-red-500 hover:text-red-700 hover:bg-red-50"
+                              onClick={() => handleCancelOrder(order.id)}
+                              title="Cancelar pedido"
+                            >
+                              <XCircle className="size-4" />
+                            </Button>
+                          </div>
                         </div>
                         <div className="space-y-1">
                           {order.items.map((item) => (
@@ -1890,15 +1918,31 @@ function CajaTab() {
             <div className="mt-3 p-3 bg-white rounded-lg border text-sm space-y-1">
               <p className="font-bold text-base mb-1">Resumen de cierre</p>
               <div className="flex justify-between"><span>Ventas totales:</span><span className="font-semibold">{formatEUR(cashCloseSummary.totalSales ?? 0)}</span></div>
-              <div className="flex justify-between"><span>Efectivo:</span><span className="font-semibold">{formatEUR(cashCloseSummary.totalCash ?? 0)}</span></div>
-              <div className="flex justify-between"><span>Tarjeta:</span><span className="font-semibold">{formatEUR(cashCloseSummary.totalCard ?? 0)}</span></div>
+              <div className="flex justify-between"><span>Efectivo sistema:</span><span className="font-semibold">{formatEUR(cashCloseSummary.totalCash ?? 0)}</span></div>
+              <div className="flex justify-between"><span>Tarjeta sistema:</span><span className="font-semibold">{formatEUR(cashCloseSummary.totalCard ?? 0)}</span></div>
               <div className="flex justify-between"><span>Proveedores:</span><span className="font-semibold text-orange-700">-{formatEUR(cashCloseSummary.totalSuppliers ?? 0)}</span></div>
               <Separator />
+              <p className="font-semibold text-sm mt-1">Efectivo</p>
               <div className="flex justify-between"><span>Esperado (apertura + efectivo - proveedores):</span><span className="font-semibold">{formatEUR(cashCloseSummary.expectedCash ?? 0)}</span></div>
-              <div className="flex justify-between"><span>Real:</span><span className="font-semibold">{formatEUR(cashCloseSummary.closingCash ?? 0)}</span></div>
-              <div className="flex justify-between"><span>Diferencia:</span>
+              <div className="flex justify-between"><span>Contado:</span><span className="font-semibold">{formatEUR(cashCloseSummary.closingCash ?? 0)}</span></div>
+              <div className="flex justify-between"><span>Diferencia efectivo:</span>
                 <span className={`font-bold ${(cashCloseSummary.difference ?? 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                   {formatEUR(cashCloseSummary.difference ?? 0)}
+                </span>
+              </div>
+              <Separator />
+              <p className="font-semibold text-sm mt-1">Tarjeta</p>
+              <div className="flex justify-between"><span>Tarjeta sistema:</span><span className="font-semibold">{formatEUR(cashCloseSummary.totalCard ?? 0)}</span></div>
+              <div className="flex justify-between"><span>Tarjeta contada:</span><span className="font-semibold">{formatEUR(cashCloseSummary.closingCard ?? 0)}</span></div>
+              <div className="flex justify-between"><span>Diferencia tarjeta:</span>
+                <span className={`font-bold ${(cashCloseSummary.cardDifference ?? 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                  {formatEUR(cashCloseSummary.cardDifference ?? 0)}
+                </span>
+              </div>
+              <Separator />
+              <div className="flex justify-between text-base"><span className="font-bold">Diferencia total:</span>
+                <span className={`font-bold ${(cashCloseSummary.totalDifference ?? 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                  {formatEUR(cashCloseSummary.totalDifference ?? 0)}
                 </span>
               </div>
               {(cashCloseSummary.supplierPayments ?? []).length > 0 && (
@@ -2027,13 +2071,23 @@ function CajaTab() {
           </DialogHeader>
           <div className="space-y-4">
             <div className="space-y-2">
-              <Label>Efectivo de cierre (€)</Label>
+              <Label>Efectivo contado (€)</Label>
               <Input
                 type="number"
                 step="0.01"
                 placeholder="0.00"
                 value={closingCashInput}
                 onChange={(e) => setClosingCashInput(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Tarjeta contabilizada (€)</Label>
+              <Input
+                type="number"
+                step="0.01"
+                placeholder="0.00"
+                value={closingCardInput}
+                onChange={(e) => setClosingCardInput(e.target.value)}
               />
             </div>
           </div>
@@ -2048,7 +2102,10 @@ function CajaTab() {
                   const res = await fetch(`/api/cash-sessions/${cashSession.id}`, {
                     method: 'PUT',
                     headers: authHeaders(),
-                    body: JSON.stringify({ closingCash: parseFloat(closingCashInput) }),
+                    body: JSON.stringify({
+                      closingCash: parseFloat(closingCashInput),
+                      closingCard: parseFloat(closingCardInput) || 0,
+                    }),
                   })
                   if (handleFetchResponse(res) && res.ok) {
                     const data = await res.json()
@@ -2056,14 +2113,20 @@ function CajaTab() {
                     toast.success('Caja cerrada correctamente')
                     setShowCloseCashDialog(false)
                     setClosingCashInput('')
+                    setClosingCardInput('')
                     setCashSession(null)
                     fetchCashSession()
                   } else {
-                    const err = await res.json()
-                    toast.error(err.error || 'Error al cerrar caja')
+                    let errorMsg = 'Error al cerrar caja'
+                    try {
+                      const err = await res.json()
+                      errorMsg = err.error || errorMsg
+                    } catch { /* not JSON */ }
+                    toast.error(errorMsg)
                   }
-                } catch {
-                  toast.error('Error de red')
+                } catch (err) {
+                  const msg = err instanceof Error ? err.message : 'Error de conexión'
+                  toast.error(msg)
                 } finally {
                   setCashSessionLoading(false)
                 }
@@ -2448,8 +2511,8 @@ function ReportesTab() {
                               <span className="font-semibold">{s.openedAt ? new Date(s.openedAt).toLocaleString('es-ES') : '-'}</span>
                               <span className="text-muted-foreground ml-2">→ {s.closedAt ? new Date(s.closedAt).toLocaleString('es-ES') : '-'}</span>
                             </div>
-                            <span className={`font-bold text-lg ${(s.difference ?? 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                              Dif: {s.difference != null ? formatEUR(s.difference) : '-'}
+                            <span className={`font-bold text-lg ${(s.totalDifference ?? s.difference ?? 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                              Dif total: {s.totalDifference != null ? formatEUR(s.totalDifference) : s.difference != null ? formatEUR(s.difference) : '-'}
                             </span>
                           </div>
                           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-sm mb-2">
@@ -2470,18 +2533,36 @@ function ReportesTab() {
                               <p className="font-bold text-orange-700">-{formatEUR(s.totalSuppliers ?? 0)}</p>
                             </div>
                           </div>
-                          <div className="grid grid-cols-3 gap-2 text-xs mb-2">
+                          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs mb-2">
                             <div className="text-center">
                               <span className="text-muted-foreground">Apertura: </span>
                               <span className="font-semibold">{formatEUR(s.openingCash ?? 0)}</span>
                             </div>
                             <div className="text-center">
-                              <span className="text-muted-foreground">Esperado: </span>
+                              <span className="text-muted-foreground">Efectivo esperado: </span>
                               <span className="font-semibold">{formatEUR(s.expectedCash ?? 0)}</span>
                             </div>
                             <div className="text-center">
-                              <span className="text-muted-foreground">Real: </span>
+                              <span className="text-muted-foreground">Efectivo contado: </span>
                               <span className="font-semibold">{formatEUR(s.closingCash ?? 0)}</span>
+                            </div>
+                          </div>
+                          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs mb-2">
+                            <div className="text-center">
+                              <span className="text-muted-foreground">Dif efectivo: </span>
+                              <span className={`font-semibold ${(s.difference ?? 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                {s.difference != null ? formatEUR(s.difference) : '-'}
+                              </span>
+                            </div>
+                            <div className="text-center">
+                              <span className="text-muted-foreground">Tarjeta contada: </span>
+                              <span className="font-semibold">{formatEUR(s.closingCard ?? 0)}</span>
+                            </div>
+                            <div className="text-center">
+                              <span className="text-muted-foreground">Dif tarjeta: </span>
+                              <span className={`font-semibold ${(s.cardDifference ?? 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                {s.cardDifference != null ? formatEUR(s.cardDifference) : '-'}
+                              </span>
                             </div>
                           </div>
                           {s.supplierPayments && s.supplierPayments.length > 0 && (

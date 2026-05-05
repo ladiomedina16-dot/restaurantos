@@ -222,7 +222,10 @@ model CashSession {
   totalCard      Float     @default(0)  // total pagos tarjeta
   totalCash      Float     @default(0)  // total pagos efectivo
   totalSuppliers Float     @default(0)  // total pagos a proveedores
-  difference     Float?     // diferencia entre cierre y esperado
+  closingCard    Float?     // dinero tarjeta contado al cierre
+  cardDifference Float?     // diferencia tarjeta: closingCard - totalCard
+  totalDifference Float?    // diferencia total: difference + cardDifference
+  difference     Float?     // diferencia entre cierre y esperado (efectivo)
   status         String    @default("open")  // open, closed
   openedAt       DateTime  @default(now())
   closedAt       DateTime?

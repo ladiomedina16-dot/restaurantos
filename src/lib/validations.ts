@@ -141,7 +141,8 @@ export const openCashSessionSchema = z.object({
 })
 
 export const closeCashSessionSchema = z.object({
-  closingCash: z.number().min(0, 'El dinero de cierre no puede ser negativo').max(99999),
+  closingCash: z.number().min(0, 'El efectivo de cierre no puede ser negativo').max(99999),
+  closingCard: z.number().min(0, 'La tarjeta de cierre no puede ser negativa').max(99999).optional().default(0),
 })
 
 // ─── Supplier Payments ──────────────────────────────────────
@@ -218,7 +219,7 @@ export function validateInput<T>(schema: z.ZodSchema<T>, data: unknown): { succe
     return { success: true, data: parsed }
   } catch (err) {
     if (err instanceof ZodError) {
-      const errors = err.issues.map((e) => `${e.path.join('.')}: ${e.message}`).join('; ')
+      const errors = err.errors.map((e) => `${e.path.join('.')}: ${e.message}`).join('; ')
       return {
         success: false,
         error: NextResponse.json(

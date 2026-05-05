@@ -136,7 +136,7 @@ export const ROLE_PERMISSIONS: Record<UserRole, string[]> = {
     'audit:read',
   ],
   camarero: [
-    'orders:read', 'orders:create', 'orders:pay',
+    'orders:read', 'orders:create', 'orders:update', 'orders:pay',
     'products:read',
     'tables:read',
     'clients:read', 'clients:create',
@@ -146,7 +146,7 @@ export const ROLE_PERMISSIONS: Record<UserRole, string[]> = {
     'products:read',
   ],
   caja: [
-    'orders:read', 'orders:pay',
+    'orders:read', 'orders:update', 'orders:pay',
     'products:read',
     'tables:read',
     'clients:read',
