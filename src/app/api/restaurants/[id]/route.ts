@@ -148,3 +148,62 @@ export async function PUT(
     return handleApiError('Restaurant PUT', error)
   }
 }
+// ─── DELETE /api/restaurants/[id] ────────────────────────────
+
+export async function DELETE(
+  request: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const auth = authenticateAndAuthorize(request, '*')
+  if ('error' in auth) return auth.error
+
+  const { user } = auth
+
+  if (user.role !== 'super_admin') {
+    return NextResponse.json(
+      { success: false, error: 'Solo super_admin puede eliminar restaurantes.' },
+      { status: 403 }
+    )
+  }
+
+  try {
+    const { id } = await params
+
+    await db.$transaction(async (tx) => {
+      await tx.supplierPayment.deleteMany({ where: { restaurantId: id } })
+      await tx.payment.deleteMany({ where: { order: { restaurantId: id } } })
+      await tx.auditLog.deleteMany({ where: { restaurantId: id } })
+      await tx.orderItem.deleteMany({ where: { order: { restaurantId: id } } })
+      await tx.order.deleteMany({ where: { restaurantId: id } })
+      await tx.cashSession.deleteMany({ where: { restaurantId: id } })
+      await tx.product.deleteMany({ where: { restaurantId: id } })
+      await tx.table.deleteMany({ where: { restaurantId: id } })
+      await tx.client.deleteMany({ where: { restaurantId: id } })
+      await tx.user.deleteMany({ where: { restaurantId: id } })
+
+      await tx.restaurant.delete({
+        where: { id },
+      })
+    })
+
+    return NextResponse.json({ success: true })
+  } catch (error: any) {
+    console.error('DELETE RESTAURANT ERROR:', {
+      name: error?.name,
+      code: error?.code,
+      message: error?.message,
+      meta: error?.meta,
+      stack: error?.stack,
+    })
+
+    return NextResponse.json(
+      {
+        success: false,
+        code: error?.code,
+        message: error?.message || 'Error al eliminar restaurante.',
+        meta: error?.meta,
+      },
+      { status: 500 }
+    )
+  }
+}
