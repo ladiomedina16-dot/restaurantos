@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { Toaster } from "@/components/ui/sonner";
@@ -13,12 +13,29 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+export const viewport: Viewport = {
+  themeColor: "#ea580c",
+};
+
 export const metadata: Metadata = {
   title: "RestaurantOS - Restaurant Management",
-  description: "Modern restaurant management system. Manage products, tables, orders, and clients in real-time.",
-  keywords: ["restaurant", "management", "orders", "POS", "kitchen"],
+  description: "Sistema de gestión de restaurantes. Pedidos, caja, cocina y barra en tiempo real.",
+  keywords: ["restaurant", "management", "orders", "POS", "kitchen", "bar"],
   icons: {
-    icon: "/favicon.ico",
+    icon: [
+      { url: "/favicon.ico", sizes: "32x32" },
+      { url: "/icon-192.png", sizes: "192x192", type: "image/png" },
+      { url: "/icon-512.png", sizes: "512x512", type: "image/png" },
+    ],
+    apple: [
+      { url: "/apple-touch-icon.png", sizes: "180x180", type: "image/png" },
+    ],
+  },
+  manifest: "/manifest.webmanifest",
+  other: {
+    "apple-mobile-web-app-capable": "yes",
+    "apple-mobile-web-app-status-bar-style": "default",
+    "mobile-web-app-capable": "yes",
   },
 };
 
