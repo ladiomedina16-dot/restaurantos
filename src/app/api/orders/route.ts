@@ -78,18 +78,14 @@ export async function GET(request: Request) {
     })
 
     // ─── Destination filter: Barra vs Cocina ────────────────
-    // destination=bar     → only items where product.category === 'bebida'
-    // destination=kitchen → only items where product.category !== 'bebida'
+    // destination=bar     → only items where item.destination === 'bar'
+    // destination=kitchen → only items where item.destination === 'kitchen'
     // no destination      → return all items (default behavior)
     if (destination === 'bar' || destination === 'kitchen') {
       const filteredOrders = orders
         .map((order) => {
           const filteredItems = order.items.filter((item) => {
-            if (destination === 'bar') {
-              return item.product.category === 'bebida'
-            }
-            // destination === 'kitchen'
-            return item.product.category !== 'bebida'
+            return item.destination === destination
           })
           return { ...order, items: filteredItems }
         })
@@ -183,6 +179,7 @@ export async function POST(request: Request) {
     }
 
     // Calculate subtotals from DB prices only, include modifiers
+    // Set destination per item based on product category and status as pending
     const orderItemsData = items.map((item) => {
       const product = productMap.get(item.productId)!
       const unitPrice = product.price
@@ -194,6 +191,8 @@ export async function POST(request: Request) {
         subtotal,
         notes: item.notes ?? '',
         modifiers: item.modifiers ? JSON.stringify(item.modifiers) : '',
+        status: 'pending' as const,
+        destination: product.category === 'bebida' ? 'bar' as const : 'kitchen' as const,
       }
     })
 

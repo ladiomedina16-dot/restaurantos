@@ -77,10 +77,36 @@ export async function POST(request: Request) {
     })
 
     if (existing) {
-      return NextResponse.json(
-        { error: 'Ya existe una mesa con este número en este restaurante' },
-        { status: 409 }
-      )
+      if (existing.active) {
+        // Active table with same number → conflict
+        return NextResponse.json(
+          { error: 'Ya existe una mesa con este número en este restaurante' },
+          { status: 409 }
+        )
+      }
+
+      // Inactive table with same number → reactivate it
+      const table = await db.table.update({
+        where: { id: existing.id },
+        data: {
+          active: true,
+          capacity,
+          zone,
+          notes,
+          status: 'available',
+        },
+      })
+
+      await createAuditLog({
+        restaurantId,
+        userId: auth.user.userId,
+        action: 'table_updated',
+        entityType: 'table',
+        entityId: table.id,
+        details: { number: table.number, capacity: table.capacity, zone: table.zone, reactivated: true },
+      })
+
+      return NextResponse.json({ table }, { status: 200 })
     }
 
     const table = await db.table.create({

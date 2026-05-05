@@ -164,21 +164,25 @@ model Order {
 
 // ─── ITEMS DE PEDIDO ────────────────────────────────────────
 model OrderItem {
-  id         String   @id @default(cuid())
-  orderId    String
-  productId  String
-  quantity   Int      @default(1)
-  unitPrice  Float    // precio al momento del pedido (snapshot, backend-only)
-  subtotal   Float    // quantity * unitPrice (backend-only calculation)
-  notes      String   @default("")       // existing field for general notes
-  modifiers  String   @default("")       // JSON: ["sin hielo", "poco hecho", "extra picante"]
-  createdAt  DateTime @default(now())
+  id          String   @id @default(cuid())
+  orderId     String
+  productId   String
+  quantity    Int      @default(1)
+  unitPrice   Float    // precio al momento del pedido (snapshot, backend-only)
+  subtotal    Float    // quantity * unitPrice (backend-only calculation)
+  notes       String   @default("")       // free-text note: "sin cebolla", "con limón"
+  modifiers   String   @default("")       // JSON: ["sin hielo", "poco hecho", "extra picante"]
+  status      String   @default("pending") // pending | ready — per-item status for bar/kitchen independence
+  destination String   @default("kitchen") // bar | kitchen — derived from product.category at creation
+  createdAt   DateTime @default(now())
 
   order     Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
   product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
 
   @@index([orderId])
   @@index([productId])
+  @@index([status])
+  @@index([destination])
 }
 
 // ─── PAGOS (audit trail) ───────────────────────────────────

@@ -174,6 +174,8 @@ interface OrderItemDetail {
   subtotal: number
   notes: string
   modifiers: string
+  status: string      // pending | ready
+  destination: string // bar | kitchen
   product: { id: string; name: string; price: number; category: string }
 }
 
@@ -335,6 +337,7 @@ function CamareroTab() {
     addOrderItem,
     removeOrderItem,
     updateOrderItemQuantity,
+    updateOrderItemNotes,
     clearOrderItems,
     resetOrder,
   } = useRestaurantStore()
@@ -697,14 +700,20 @@ function CamareroTab() {
         {/* Order summary bar */}
         {currentOrderItems.length > 0 && (
           <div className="border-t bg-amber-50 p-3">
-            <ScrollArea className="max-h-32 mb-2">
-              <div className="space-y-1">
+            <ScrollArea className="max-h-48 mb-2">
+              <div className="space-y-2">
                 {currentOrderItems.map((item) => (
-                  <div key={item.productId} className="flex items-center justify-between text-sm">
-                    <div className="flex items-center gap-2 flex-1 min-w-0">
+                  <div key={item.productId} className="flex items-start justify-between text-sm">
+                    <div className="flex flex-col gap-1 flex-1 min-w-0">
                       <span className="font-medium truncate">{item.name}</span>
+                      <Input
+                        placeholder="Nota..."
+                        value={item.notes}
+                        onChange={(e) => updateOrderItemNotes(item.productId, e.target.value)}
+                        className="h-7 text-xs border-amber-200 bg-white"
+                      />
                     </div>
-                    <div className="flex items-center gap-1 shrink-0">
+                    <div className="flex items-center gap-1 shrink-0 ml-2">
                       <Button
                         variant="outline"
                         size="sm"
@@ -818,7 +827,10 @@ function CamareroTab() {
                   <div className="space-y-1">
                     {order.items.map((item) => (
                       <div key={item.id} className="flex justify-between text-sm">
-                        <span><span className="font-medium">{item.quantity}x</span> {item.product?.name ?? 'Producto'}</span>
+                        <div>
+                          <span><span className="font-medium">{item.quantity}x</span> {item.product?.name ?? 'Producto'}</span>
+                          {item.notes && <span className="text-xs text-muted-foreground ml-2">📝 {item.notes}</span>}
+                        </div>
                         <span className="text-muted-foreground">{formatEUR(item.subtotal)}</span>
                       </div>
                     ))}
@@ -959,17 +971,23 @@ function CamareroTab() {
 function CocinaTab() {
   const [orders, setOrders] = useState<Order[]>([])
   const [loading, setLoading] = useState(true)
-  const [finishing, setFinishing] = useState<string | null>(null)
+  const [markingItem, setMarkingItem] = useState<string | null>(null)
+  const [cancellingOrder, setCancellingOrder] = useState<string | null>(null)
   const [now, setNow] = useState(Date.now())
   const { authHeaders, handleFetchResponse } = useAuth()
 
   const fetchOrders = useCallback(async () => {
     try {
-      // destination=kitchen filters out bebida items — only food items shown
+      // destination=kitchen filters to kitchen items — show pending + in_progress orders
       const res = await fetch('/api/orders?status=pending,in_progress&destination=kitchen', { headers: authHeaders(false) })
       if (handleFetchResponse(res) && res.ok) {
         const json = await res.json()
-        setOrders(json.orders)
+        // Filter out orders where ALL kitchen items are already ready
+        const filtered = (json.orders as Order[]).filter((order) => {
+          const kitchenItems = order.items.filter((i) => i.destination === 'kitchen')
+          return kitchenItems.some((i) => i.status !== 'ready')
+        })
+        setOrders(filtered)
       }
     } catch { /* silently fail */ } finally {
       setLoading(false)
@@ -988,37 +1006,75 @@ function CocinaTab() {
     return () => clearInterval(interval)
   }, [])
 
-  // Simplified: Cocina only uses pending → listo (ready)
-  // No payment/served states shown to kitchen
-  const handleListo = async (order: Order) => {
-    setFinishing(order.id)
+  // Per-item ready: mark a single kitchen item as ready
+  const handleItemReady = async (orderId: string, itemId: string) => {
+    setMarkingItem(itemId)
     try {
-      if (order.status === 'pending') {
-        const preRes = await fetch(`/api/orders/${order.id}`, {
-          method: 'PUT',
-          headers: authHeaders(),
-          body: JSON.stringify({ status: 'in_progress' }),
-        })
-        handleFetchResponse(preRes)
-      }
-
-      const res = await fetch(`/api/orders/${order.id}`, {
-        method: 'PUT',
+      const res = await fetch(`/api/orders/${orderId}/items/${itemId}`, {
+        method: 'PATCH',
         headers: authHeaders(),
         body: JSON.stringify({ status: 'ready' }),
       })
 
       if (handleFetchResponse(res) && res.ok) {
-        toast.success(`Mesa ${order.table?.number ?? '?'} — ¡Listo!`)
-        setOrders((prev) => prev.filter((o) => o.id !== order.id))
+        const json = await res.json()
+        const orderStatus = json.orderStatus as string
+
+        // Update local state: mark the item as ready
+        setOrders((prev) =>
+          prev.map((o) => {
+            if (o.id !== orderId) return o
+            const newItems = o.items.map((i) =>
+              i.id === itemId ? { ...i, status: 'ready' } : i
+            )
+            return { ...o, items: newItems, status: orderStatus }
+          })
+        )
+
+        // Check if ALL kitchen items for this order are now ready
+        const order = orders.find((o) => o.id === orderId)
+        if (order) {
+          const kitchenItems = order.items.filter((i) => i.destination === 'kitchen')
+          const remainingPending = kitchenItems.filter(
+            (i) => i.id !== itemId && i.status !== 'ready'
+          )
+          if (remainingPending.length === 0) {
+            // All kitchen items ready — remove from view and toast
+            toast.success(`Mesa ${order.table?.number ?? '?'} — ¡Comida lista!`)
+            setOrders((prev) => prev.filter((o) => o.id !== orderId))
+          }
+        }
       } else {
         const err = await res.json()
-        toast.error(err.error || 'Error al actualizar pedido')
+        toast.error(err.error || 'Error al actualizar item')
       }
     } catch {
       toast.error('Error de red')
     } finally {
-      setFinishing(null)
+      setMarkingItem(null)
+    }
+  }
+
+  // Cancel entire order
+  const handleCancelOrder = async (order: Order) => {
+    setCancellingOrder(order.id)
+    try {
+      const res = await fetch(`/api/orders/${order.id}`, {
+        method: 'PUT',
+        headers: authHeaders(),
+        body: JSON.stringify({ status: 'cancelled' }),
+      })
+      if (handleFetchResponse(res) && res.ok) {
+        toast.success(`Mesa ${order.table?.number ?? '?'} — Pedido cancelado`)
+        setOrders((prev) => prev.filter((o) => o.id !== order.id))
+      } else {
+        const err = await res.json()
+        toast.error(err.error || 'Error al cancelar pedido')
+      }
+    } catch {
+      toast.error('Error de red')
+    } finally {
+      setCancellingOrder(null)
     }
   }
 
@@ -1073,7 +1129,7 @@ function CocinaTab() {
               key={order.id}
               className={`bg-gray-800 rounded-xl p-4 border-l-4 transition-all ${
                 order.status === 'pending' ? 'border-l-amber-500' : 'border-l-orange-500'
-              } ${finishing === order.id ? 'opacity-50 scale-95' : ''}`}
+              } ${cancellingOrder === order.id ? 'opacity-50 scale-95' : ''}`}
             >
               {/* Card header: Mesa + Time — NO PRICES */}
               <div className="flex items-start justify-between mb-3">
@@ -1102,34 +1158,52 @@ function CocinaTab() {
                 {order.status === 'pending' ? '⏳ Pendiente' : '🔥 Preparando'}
               </Badge>
 
-              {/* Items list — NO PRICES shown */}
-              <div className="space-y-1 mb-4">
-                {order.items.map((item) => (
-                  <div key={item.id} className="flex items-start gap-2 text-white">
-                    <span className="flex size-6 items-center justify-center rounded bg-amber-600/30 text-amber-300 text-xs font-bold shrink-0">
-                      {item.quantity}
-                    </span>
-                    <span className="text-sm leading-tight">{item.product?.name ?? 'Producto'}</span>
-                    {item.notes && (
-                      <span className="text-xs text-amber-400 ml-1">({item.notes})</span>
-                    )}
-                    {item.modifiers && item.modifiers !== '[]' && item.modifiers !== '' && (
-                      <span className="text-xs text-red-400 ml-1">
-                        ({JSON.parse(item.modifiers).join(', ')})
+              {/* Items list — per-item LISTO buttons, NO PRICES shown */}
+              <div className="space-y-2 mb-4">
+                {order.items.map((item) => {
+                  const isReady = item.status === 'ready'
+                  return (
+                    <div key={item.id} className="flex items-center gap-2">
+                      <span className={`flex size-6 items-center justify-center rounded text-xs font-bold shrink-0 ${isReady ? 'bg-green-600/30 text-green-300' : 'bg-amber-600/30 text-amber-300'}`}>
+                        {isReady ? <CheckCircle className="size-4" /> : item.quantity}
                       </span>
-                    )}
-                  </div>
-                ))}
+                      <span className={`text-sm leading-tight flex-1 ${isReady ? 'line-through text-gray-500' : 'text-white'}`}>
+                        {item.product?.name ?? 'Producto'}
+                      </span>
+                      {item.notes && (
+                        <span className={`text-xs ml-1 ${isReady ? 'text-gray-600' : 'text-amber-400'}`}>({item.notes})</span>
+                      )}
+                      {item.modifiers && item.modifiers !== '[]' && item.modifiers !== '' && (
+                        <span className={`text-xs ml-1 ${isReady ? 'text-gray-600' : 'text-red-400'}`}>
+                          ({JSON.parse(item.modifiers).join(', ')})
+                        </span>
+                      )}
+                      {isReady ? (
+                        <CheckCircle className="size-5 text-green-400 shrink-0" />
+                      ) : (
+                        <Button
+                          size="sm"
+                          className="h-8 px-3 text-xs font-bold bg-green-600 hover:bg-green-700 text-white shrink-0"
+                          onClick={() => handleItemReady(order.id, item.id)}
+                          disabled={markingItem === item.id}
+                        >
+                          {markingItem === item.id ? '...' : 'LISTO'}
+                        </Button>
+                      )}
+                    </div>
+                  )
+                })}
               </div>
 
-              {/* LISTO button only — no print/client/payment buttons */}
+              {/* CANCELAR button */}
               <Button
-                className="w-full h-14 text-lg font-bold bg-green-600 hover:bg-green-700 text-white"
-                onClick={() => handleListo(order)}
-                disabled={finishing === order.id}
+                variant="outline"
+                className="w-full h-10 text-sm font-bold border-red-600/50 text-red-400 hover:bg-red-900/30 hover:text-red-300"
+                onClick={() => handleCancelOrder(order)}
+                disabled={cancellingOrder === order.id}
               >
-                <CheckCircle className="size-6 mr-2" />
-                LISTO
+                <XCircle className="size-4 mr-2" />
+                CANCELAR
               </Button>
             </div>
           ))}
@@ -1144,7 +1218,8 @@ function CocinaTab() {
 function BarraTab() {
   const [orders, setOrders] = useState<Order[]>([])
   const [loading, setLoading] = useState(true)
-  const [finishing, setFinishing] = useState<string | null>(null)
+  const [markingItem, setMarkingItem] = useState<string | null>(null)
+  const [cancellingOrder, setCancellingOrder] = useState<string | null>(null)
   const { authHeaders, handleFetchResponse } = useAuth()
 
   const fetchOrders = useCallback(async () => {
@@ -1152,7 +1227,12 @@ function BarraTab() {
       const res = await fetch('/api/orders?status=pending,in_progress&destination=bar', { headers: authHeaders(false) })
       if (handleFetchResponse(res) && res.ok) {
         const json = await res.json()
-        setOrders(json.orders)
+        // Filter out orders where ALL bar items are already ready
+        const filtered = (json.orders as Order[]).filter((order) => {
+          const barItems = order.items.filter((i) => i.destination === 'bar')
+          return barItems.some((i) => i.status !== 'ready')
+        })
+        setOrders(filtered)
       }
     } catch { /* silently fail */ } finally {
       setLoading(false)
@@ -1165,35 +1245,75 @@ function BarraTab() {
     return () => clearInterval(interval)
   }, [fetchOrders])
 
-  const handleListo = async (order: Order) => {
-    setFinishing(order.id)
+  // Per-item ready: mark a single bar item as ready
+  const handleItemReady = async (orderId: string, itemId: string) => {
+    setMarkingItem(itemId)
     try {
-      if (order.status === 'pending') {
-        const preRes = await fetch(`/api/orders/${order.id}`, {
-          method: 'PUT',
-          headers: authHeaders(),
-          body: JSON.stringify({ status: 'in_progress' }),
-        })
-        handleFetchResponse(preRes)
-      }
-
-      const res = await fetch(`/api/orders/${order.id}`, {
-        method: 'PUT',
+      const res = await fetch(`/api/orders/${orderId}/items/${itemId}`, {
+        method: 'PATCH',
         headers: authHeaders(),
         body: JSON.stringify({ status: 'ready' }),
       })
 
       if (handleFetchResponse(res) && res.ok) {
-        toast.success(`Mesa ${order.table?.number ?? '?'} — Bebidas listas`)
-        setOrders((prev) => prev.filter((o) => o.id !== order.id))
+        const json = await res.json()
+        const orderStatus = json.orderStatus as string
+
+        // Update local state: mark the item as ready
+        setOrders((prev) =>
+          prev.map((o) => {
+            if (o.id !== orderId) return o
+            const newItems = o.items.map((i) =>
+              i.id === itemId ? { ...i, status: 'ready' } : i
+            )
+            return { ...o, items: newItems, status: orderStatus }
+          })
+        )
+
+        // Check if ALL bar items for this order are now ready
+        const order = orders.find((o) => o.id === orderId)
+        if (order) {
+          const barItems = order.items.filter((i) => i.destination === 'bar')
+          const remainingPending = barItems.filter(
+            (i) => i.id !== itemId && i.status !== 'ready'
+          )
+          if (remainingPending.length === 0) {
+            // All bar items ready — remove from view and toast
+            toast.success(`Mesa ${order.table?.number ?? '?'} — ¡Bebidas listas!`)
+            setOrders((prev) => prev.filter((o) => o.id !== orderId))
+          }
+        }
       } else {
         const err = await res.json()
-        toast.error(err.error || 'Error al actualizar pedido')
+        toast.error(err.error || 'Error al actualizar item')
       }
     } catch {
       toast.error('Error de red')
     } finally {
-      setFinishing(null)
+      setMarkingItem(null)
+    }
+  }
+
+  // Cancel entire order
+  const handleCancelOrder = async (order: Order) => {
+    setCancellingOrder(order.id)
+    try {
+      const res = await fetch(`/api/orders/${order.id}`, {
+        method: 'PUT',
+        headers: authHeaders(),
+        body: JSON.stringify({ status: 'cancelled' }),
+      })
+      if (handleFetchResponse(res) && res.ok) {
+        toast.success(`Mesa ${order.table?.number ?? '?'} — Pedido cancelado`)
+        setOrders((prev) => prev.filter((o) => o.id !== order.id))
+      } else {
+        const err = await res.json()
+        toast.error(err.error || 'Error al cancelar pedido')
+      }
+    } catch {
+      toast.error('Error de red')
+    } finally {
+      setCancellingOrder(null)
     }
   }
 
@@ -1241,7 +1361,7 @@ function BarraTab() {
               key={order.id}
               className={`bg-white rounded-xl p-4 border-l-4 transition-all shadow-sm ${
                 order.status === 'pending' ? 'border-l-amber-500' : 'border-l-orange-500'
-              } ${finishing === order.id ? 'opacity-50 scale-95' : ''}`}
+              } ${cancellingOrder === order.id ? 'opacity-50 scale-95' : ''}`}
             >
               <div className="flex items-start justify-between mb-3">
                 <div>
@@ -1268,18 +1388,35 @@ function BarraTab() {
                 {order.status === 'pending' ? '⏳ Pendiente' : '🔥 Preparando'}
               </Badge>
 
-              <div className="space-y-1 mb-4">
-                {order.items.map((item) => (
-                  <div key={item.id} className="flex items-start gap-2 text-amber-900">
-                    <span className="flex size-6 items-center justify-center rounded bg-amber-200 text-amber-800 text-xs font-bold shrink-0">
-                      {item.quantity}
-                    </span>
-                    <span className="text-sm leading-tight">{item.product?.name ?? 'Bebida'}</span>
-                    {item.notes && (
-                      <span className="text-xs text-amber-500 ml-1">({item.notes})</span>
-                    )}
-                  </div>
-                ))}
+              <div className="space-y-2 mb-4">
+                {order.items.map((item) => {
+                  const isReady = item.status === 'ready'
+                  return (
+                    <div key={item.id} className="flex items-center gap-2">
+                      <span className={`flex size-6 items-center justify-center rounded text-xs font-bold shrink-0 ${isReady ? 'bg-green-200 text-green-800' : 'bg-amber-200 text-amber-800'}`}>
+                        {isReady ? <CheckCircle className="size-4" /> : item.quantity}
+                      </span>
+                      <span className={`text-sm leading-tight flex-1 ${isReady ? 'line-through text-amber-400' : 'text-amber-900'}`}>
+                        {item.product?.name ?? 'Bebida'}
+                      </span>
+                      {item.notes && (
+                        <span className={`text-xs ml-1 ${isReady ? 'text-amber-300' : 'text-amber-500'}`}>({item.notes})</span>
+                      )}
+                      {isReady ? (
+                        <CheckCircle className="size-5 text-green-600 shrink-0" />
+                      ) : (
+                        <Button
+                          size="sm"
+                          className="h-8 px-3 text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white shrink-0"
+                          onClick={() => handleItemReady(order.id, item.id)}
+                          disabled={markingItem === item.id}
+                        >
+                          {markingItem === item.id ? '...' : 'LISTO'}
+                        </Button>
+                      )}
+                    </div>
+                  )
+                })}
               </div>
 
               {order.client && (
@@ -1290,12 +1427,13 @@ function BarraTab() {
               )}
 
               <Button
-                className="w-full h-14 text-lg font-bold bg-amber-600 hover:bg-amber-700 text-white"
-                onClick={() => handleListo(order)}
-                disabled={finishing === order.id}
+                variant="outline"
+                className="w-full h-10 text-sm font-bold border-red-300 text-red-600 hover:bg-red-50 hover:text-red-700"
+                onClick={() => handleCancelOrder(order)}
+                disabled={cancellingOrder === order.id}
               >
-                <CheckCircle className="size-6 mr-2" />
-                LISTO
+                <XCircle className="size-4 mr-2" />
+                CANCELAR
               </Button>
             </div>
           ))}
