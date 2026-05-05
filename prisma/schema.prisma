@@ -1,6 +1,7 @@
 // ============================================================
-// RESTAURANT APP - Production Schema v4
+// RESTAURANT APP - Production Schema v5
 // PostgreSQL (Supabase) - Multi-restaurant, audit, cash sessions
+// onDelete: Cascade on all Restaurant child relations
 // ============================================================
 
 generator client {
@@ -25,13 +26,14 @@ model Restaurant {
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 
-  users        User[]
-  products     Product[]
-  tables       Table[]
-  clients      Client[]
-  orders       Order[]
+  users             User[]
+  products          Product[]
+  tables            Table[]
+  clients           Client[]
+  orders            Order[]
   cashSessions      CashSession[]
-  supplierPayments   SupplierPayment[]
+  supplierPayments  SupplierPayment[]
+  auditLogs         AuditLog[]
 
   @@index([subscriptionStatus])
 }
@@ -51,7 +53,7 @@ model User {
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
 
-  restaurant Restaurant? @relation(fields: [restaurantId], references: [id])
+  restaurant Restaurant? @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
 
   // Relations - who created/processed things
   ordersCreated        Order[]       @relation("OrderCreator")
@@ -81,7 +83,7 @@ model Product {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  restaurant Restaurant  @relation(fields: [restaurantId], references: [id])
+  restaurant Restaurant  @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
   orderItems OrderItem[]
 
   @@index([restaurantId])
@@ -101,7 +103,7 @@ model Table {
   active       Boolean @default(true)
   restaurantId String
 
-  restaurant Restaurant @relation(fields: [restaurantId], references: [id])
+  restaurant Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
   orders     Order[]
 
   @@index([restaurantId])
@@ -122,7 +124,7 @@ model Client {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  restaurant Restaurant @relation(fields: [restaurantId], references: [id])
+  restaurant Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
   orders     Order[]
 
   @@index([restaurantId])
@@ -145,11 +147,11 @@ model Order {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  restaurant Restaurant  @relation(fields: [restaurantId], references: [id])
-  table       Table      @relation(fields: [tableId], references: [id])
-  client      Client?    @relation(fields: [clientId], references: [id])
-  createdBy   User?      @relation("OrderCreator", fields: [createdById], references: [id])
-  finishedBy  User?      @relation("OrderFinisher", fields: [finishedById], references: [id])
+  restaurant Restaurant  @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  table       Table      @relation(fields: [tableId], references: [id], onDelete: Cascade)
+  client      Client?    @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  createdBy   User?      @relation("OrderCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  finishedBy  User?      @relation("OrderFinisher", fields: [finishedById], references: [id], onDelete: SetNull)
   items       OrderItem[]
   payments    Payment[]
 
@@ -173,7 +175,7 @@ model OrderItem {
   createdAt  DateTime @default(now())
 
   order     Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  product   Product @relation(fields: [productId], references: [id])
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
 
   @@index([orderId])
   @@index([productId])
@@ -193,9 +195,9 @@ model Payment {
   cashSessionId String? // linked to cash session
   createdAt    DateTime @default(now())
 
-  order       Order       @relation(fields: [orderId], references: [id])
-  user        User        @relation(fields: [userId], references: [id])
-  cashSession CashSession? @relation(fields: [cashSessionId], references: [id])
+  order       Order        @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  cashSession CashSession? @relation(fields: [cashSessionId], references: [id], onDelete: SetNull)
 
   @@index([orderId])
   @@index([userId])
@@ -221,9 +223,9 @@ model CashSession {
   openedAt       DateTime  @default(now())
   closedAt       DateTime?
 
-  restaurant       Restaurant        @relation(fields: [restaurantId], references: [id])
-  openedBy         User              @relation("CashSessionOpener", fields: [openedById], references: [id])
-  closedBy         User?             @relation("CashSessionCloser", fields: [closedById], references: [id])
+  restaurant       Restaurant        @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  openedBy         User              @relation("CashSessionOpener", fields: [openedById], references: [id], onDelete: Cascade)
+  closedBy         User?             @relation("CashSessionCloser", fields: [closedById], references: [id], onDelete: SetNull)
   payments         Payment[]
   supplierPayments SupplierPayment[]
 
@@ -244,7 +246,8 @@ model AuditLog {
   ipAddress    String   @default("")
   createdAt    DateTime @default(now())
 
-  user User? @relation(fields: [userId], references: [id])
+  restaurant Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  user       User?      @relation(fields: [userId], references: [id], onDelete: SetNull)
 
   @@index([restaurantId])
   @@index([userId])
@@ -263,9 +266,9 @@ model SupplierPayment {
   cashSessionId  String   // sesión de caja vinculada
   createdAt      DateTime @default(now())
 
-  user        User        @relation(fields: [userId], references: [id])
-  restaurant  Restaurant  @relation(fields: [restaurantId], references: [id])
-  cashSession CashSession @relation(fields: [cashSessionId], references: [id])
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  restaurant  Restaurant  @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  cashSession CashSession @relation(fields: [cashSessionId], references: [id], onDelete: Cascade)
 
   @@index([restaurantId])
   @@index([cashSessionId])
