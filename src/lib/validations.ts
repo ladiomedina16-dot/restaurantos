@@ -2,7 +2,8 @@
 // Zod validation schemas for all API inputs
 // ============================================================
 
-import { z } from 'zod'
+import { NextResponse } from 'next/server'
+import { z, ZodError } from 'zod'
 
 // ─── Auth ──────────────────────────────────────────────────
 
@@ -20,24 +21,36 @@ export const refreshTokenSchema = z.object({
 export const createProductSchema = z.object({
   name: z.string().min(1, 'Nombre es obligatorio').max(100),
   description: z.string().max(500).optional().default(''),
-  price: z.number().min(0, 'El precio no puede ser negativo').max(9999),
+  price: z.coerce.number().min(0, 'El precio no puede ser negativo').max(9999),
   category: z.enum([
-    'bebida', 'tapa_fria', 'tapa_caliente', 'montadito',
-    'racion', 'postre', 'comida', 'general',
+    'bebida',
+    'tapa_fria',
+    'tapa_caliente',
+    'montadito',
+    'racion',
+    'postre',
+    'comida',
+    'general',
   ]).optional().default('general'),
-  stock: z.number().int().min(0).optional().default(0),
-  imageUrl: z.string().url().optional().default(''),
+  stock: z.coerce.number().int().min(0).optional().default(0),
+  imageUrl: z.string().optional().default(''),
 })
 
 export const updateProductSchema = z.object({
   name: z.string().min(1).max(100).optional(),
   description: z.string().max(500).optional(),
-  price: z.number().min(0).max(9999).optional(),
+  price: z.coerce.number().min(0).max(9999).optional(),
   category: z.enum([
-    'bebida', 'tapa_fria', 'tapa_caliente', 'montadito',
-    'racion', 'postre', 'comida', 'general',
+    'bebida',
+    'tapa_fria',
+    'tapa_caliente',
+    'montadito',
+    'racion',
+    'postre',
+    'comida',
+    'general',
   ]).optional(),
-  stock: z.number().int().min(0).optional(),
+  stock: z.coerce.number().int().min(0).optional(),
   imageUrl: z.string().optional(),
   active: z.boolean().optional(),
 })
@@ -45,15 +58,15 @@ export const updateProductSchema = z.object({
 // ─── Tables ────────────────────────────────────────────────
 
 export const createTableSchema = z.object({
-  number: z.number().int().min(1, 'Número de mesa obligatorio').max(999),
-  capacity: z.number().int().min(1).max(50).optional().default(4),
+  number: z.coerce.number().int().min(1, 'Número de mesa obligatorio').max(999),
+  capacity: z.coerce.number().int().min(1).max(50).optional().default(4),
   zone: z.enum(['main', 'terrace', 'private', 'bar']).optional().default('main'),
   notes: z.string().max(200).optional().default(''),
 })
 
 export const updateTableSchema = z.object({
-  number: z.number().int().min(1).max(999).optional(),
-  capacity: z.number().int().min(1).max(50).optional(),
+  number: z.coerce.number().int().min(1).max(999).optional(),
+  capacity: z.coerce.number().int().min(1).max(50).optional(),
   zone: z.enum(['main', 'terrace', 'private', 'bar']).optional(),
   status: z.enum(['available', 'occupied', 'reserved']).optional(),
   notes: z.string().max(200).optional(),
@@ -65,7 +78,7 @@ export const updateTableSchema = z.object({
 export const createClientSchema = z.object({
   name: z.string().min(1, 'Nombre es obligatorio').max(100),
   phone: z.string().min(1, 'Teléfono es obligatorio').max(20),
-  email: z.string().email('Email inválido').optional().default(''),
+  email: z.string().email('Email inválido').optional().or(z.literal('')).default(''),
   notes: z.string().max(500).optional().default(''),
 })
 
@@ -74,15 +87,15 @@ export const updateClientSchema = z.object({
   phone: z.string().min(1).max(20).optional(),
   email: z.string().optional(),
   notes: z.string().max(500).optional(),
-  points: z.number().int().min(0).optional(),
-  visits: z.number().int().min(0).optional(),
+  points: z.coerce.number().int().min(0).optional(),
+  visits: z.coerce.number().int().min(0).optional(),
 })
 
 // ─── Orders ────────────────────────────────────────────────
 
 export const orderItemInputSchema = z.object({
   productId: z.string().min(1, 'Product ID obligatorio'),
-  quantity: z.number().int().min(1, 'Cantidad mínima: 1').max(99),
+  quantity: z.coerce.number().int().min(1, 'Cantidad mínima: 1').max(99),
   notes: z.string().max(200).optional(),
   modifiers: z.array(z.string().max(50)).max(10).optional(),
 })
@@ -99,6 +112,11 @@ export const updateOrderSchema = z.object({
   notes: z.string().max(500).optional(),
 })
 
+export const updateOrderItemSchema = z.object({
+  status: z.enum(['pending', 'ready']).optional(),
+  notes: z.string().max(200).optional(),
+})
+
 // ─── Payment ───────────────────────────────────────────────
 
 export const payOrderSchema = z.object({
@@ -112,10 +130,27 @@ export const createUserSchema = z.object({
   username: z.string().min(3, 'Mínimo 3 caracteres').max(30),
   password: z.string().min(6, 'Mínimo 6 caracteres').max(100),
   name: z.string().max(100).optional().default(''),
-  role: z.enum(['super_admin', 'admin', 'encargado', 'camarero', 'cocina', 'caja']).optional().default('camarero'),
+  role: z.enum([
+    'super_admin',
+    'admin',
+    'encargado',
+    'camarero',
+    'cocina',
+    'barra',
+    'caja',
+  ]).optional().default('camarero'),
   active: z.boolean().optional().default(true),
   zone: z.enum(['main', 'terrace', 'bar', 'private']).optional().nullable(),
   restaurantId: z.string().optional().nullable(),
+})
+
+export const deleteUserSchema = z.object({
+  id: z.string().min(1),
+})
+
+export const updateUserStatusSchema = z.object({
+  id: z.string().min(1, 'ID de usuario requerido'),
+  active: z.boolean(),
 })
 
 // ─── Restaurants ───────────────────────────────────────────
@@ -134,28 +169,46 @@ export const updateRestaurantSchema = z.object({
   active: z.boolean().optional(),
 })
 
+export const updateRestaurantFullSchema = z.object({
+  name: z.string().min(1).max(100).optional(),
+  address: z.string().max(200).optional(),
+  phone: z.string().max(20).optional(),
+  active: z.boolean().optional(),
+  subscriptionStatus: z.enum(['trial', 'active', 'suspended']).optional(),
+})
+
 // ─── Cash Sessions ─────────────────────────────────────────
 
 export const openCashSessionSchema = z.object({
-  openingCash: z.number().min(0, 'El dinero inicial no puede ser negativo').max(99999),
+  openingCash: z.coerce.number().min(0, 'El dinero inicial no puede ser negativo').max(99999),
 })
 
 export const closeCashSessionSchema = z.object({
-  closingCash: z.number().min(0, 'El efectivo de cierre no puede ser negativo').max(99999),
-  closingCard: z.number().min(0, 'La tarjeta de cierre no puede ser negativa').max(99999).optional().default(0),
+  closingCash: z.coerce.number().min(0, 'El dinero de cierre no puede ser negativo').max(99999),
+  closingCard: z.coerce.number().min(0, 'El dinero de tarjeta no puede ser negativo').max(99999).optional().default(0),
 })
 
-// ─── Supplier Payments ──────────────────────────────────────
+// ─── Supplier Payments / Provider Expenses ─────────────────
 
 export const createSupplierPaymentSchema = z.object({
-  concept: z.string().min(1, 'Concepto obligatorio').max(200),
-  amount: z.number().min(0.01, 'El monto debe ser mayor que 0').max(99999),
+  concept: z.string().min(1, 'El concepto es obligatorio').max(200),
+  amount: z.coerce.number().positive('El monto debe ser mayor a 0').max(99999),
 })
 
 // ─── Reports ───────────────────────────────────────────────
 
 export const reportsQuerySchema = z.object({
-  type: z.enum(['daily_sales', 'payment_methods', 'top_products', 'cancelled_orders', 'cash_closes', 'sales_by_user', 'bar_orders', 'kitchen_orders', 'supplier_payments']),
+  type: z.enum([
+    'daily_sales',
+    'payment_methods',
+    'top_products',
+    'cancelled_orders',
+    'cash_closes',
+    'supplier_payments',
+    'sales_by_user',
+    'bar_orders',
+    'kitchen_orders',
+  ]),
   dateFrom: z.string().optional(),
   dateTo: z.string().optional(),
 })
@@ -183,43 +236,30 @@ export const resetPasswordSchema = z.object({
 // ─── Onboarding ────────────────────────────────────────────
 
 export const onboardingSchema = z.object({
-  restaurantName: z.string().min(1, 'Nombre obligatorio').max(100),
-  slug: z.string().min(1).max(50).regex(/^[a-z0-9-]+$/, 'Solo minúsculas, números y guiones'),
+  restaurantName: z.string().min(1, 'El nombre del restaurante es obligatorio').max(100),
+  slug: z.string().min(1, 'El slug es obligatorio').max(50).regex(/^[a-z0-9-]+$/, 'Solo minúsculas, números y guiones'),
   address: z.string().max(200).optional().default(''),
   phone: z.string().max(20).optional().default(''),
+  adminName: z.string().min(1, 'El nombre del administrador es obligatorio').max(100),
   adminUsername: z.string().min(3, 'Mínimo 3 caracteres').max(30),
   adminPassword: z.string().min(6, 'Mínimo 6 caracteres').max(100),
-  adminName: z.string().max(100).optional().default(''),
-})
-
-// ─── Update Restaurant (with subscriptionStatus) ───────────
-
-export const updateRestaurantFullSchema = z.object({
-  name: z.string().min(1).max(100).optional(),
-  address: z.string().max(200).optional(),
-  phone: z.string().max(20).optional(),
-  active: z.boolean().optional(),
-  subscriptionStatus: z.enum(['trial', 'active', 'suspended']).optional(),
-})
-
-// ─── Update User Active Status ─────────────────────────────
-
-export const updateUserStatusSchema = z.object({
-  active: z.boolean(),
 })
 
 // ─── Validation helper ─────────────────────────────────────
 
-import { NextResponse } from 'next/server'
-import { ZodError } from 'zod'
-
-export function validateInput<T>(schema: z.ZodSchema<T>, data: unknown): { success: true; data: T } | { success: false; error: NextResponse } {
+export function validateInput<T>(
+  schema: z.ZodSchema<T>,
+  data: unknown
+): { success: true; data: T } | { success: false; error: NextResponse } {
   try {
     const parsed = schema.parse(data)
     return { success: true, data: parsed }
   } catch (err) {
     if (err instanceof ZodError) {
-      const errors = err.issues.map((e) => `${e.path.join('.')}: ${e.message}`).join('; ')
+      const errors = err.issues
+        .map((e) => `${e.path.join('.')}: ${e.message}`)
+        .join('; ')
+
       return {
         success: false,
         error: NextResponse.json(
@@ -228,6 +268,7 @@ export function validateInput<T>(schema: z.ZodSchema<T>, data: unknown): { succe
         ),
       }
     }
+
     return {
       success: false,
       error: NextResponse.json(

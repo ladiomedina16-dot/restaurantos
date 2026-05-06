@@ -102,11 +102,12 @@ import { toast } from 'sonner'
 // ─── Client-side permission check (mirrors server ROLE_PERMISSIONS) ──────────
 const CLIENT_ROLE_PERMISSIONS: Record<string, string[]> = {
   super_admin: ['*'],
-  admin: ['orders:read', 'orders:create', 'orders:update', 'orders:pay', 'products:read', 'products:create', 'products:update', 'products:delete', 'tables:read', 'tables:create', 'tables:update', 'tables:delete', 'clients:read', 'clients:create', 'clients:update', 'clients:delete', 'users:read', 'users:create', 'users:update', 'users:delete', 'payments:read', 'dashboard:read', 'cash:read', 'cash:open', 'cash:close', 'print:read', 'audit:read'],
-  encargado: ['orders:read', 'orders:create', 'orders:update', 'orders:pay', 'products:read', 'products:update', 'tables:read', 'tables:update', 'clients:read', 'clients:create', 'clients:update', 'users:read', 'payments:read', 'dashboard:read', 'cash:read', 'cash:open', 'cash:close', 'print:read', 'audit:read'],
-  camarero: ['orders:read', 'orders:create', 'orders:update', 'orders:pay', 'products:read', 'tables:read', 'clients:read', 'clients:create'],
+  admin: ['orders:read', 'orders:create', 'orders:update', 'orders:cancel', 'orders:pay', 'products:read', 'products:create', 'products:update', 'products:delete', 'tables:read', 'tables:create', 'tables:update', 'tables:delete', 'clients:read', 'clients:create', 'clients:update', 'clients:delete', 'users:read', 'users:create', 'users:update', 'users:delete', 'payments:read', 'dashboard:read', 'cash:read', 'cash:open', 'cash:close', 'print:read', 'audit:read'],
+  encargado: ['orders:read', 'orders:create', 'orders:update', 'orders:cancel', 'orders:pay', 'products:read', 'products:update', 'tables:read', 'tables:update', 'clients:read', 'clients:create', 'clients:update', 'users:read', 'payments:read', 'dashboard:read', 'cash:read', 'cash:open', 'cash:close', 'print:read', 'audit:read'],
+  camarero: ['orders:read', 'orders:create', 'orders:update', 'orders:cancel', 'products:read', 'tables:read', 'clients:read', 'clients:create'],
   cocina: ['orders:read', 'orders:update', 'products:read'],
-  caja: ['orders:read', 'orders:update', 'orders:pay', 'products:read', 'tables:read', 'clients:read', 'payments:read', 'cash:read', 'cash:open', 'cash:close', 'print:read'],
+  barra: ['orders:read', 'orders:update', 'products:read'],
+  caja: ['orders:read', 'orders:update', 'orders:cancel', 'orders:pay', 'products:read', 'tables:read', 'clients:read', 'payments:read', 'cash:read', 'cash:open', 'cash:close', 'print:read'],
 }
 
 function clientHasPermission(role: string, permission: string): boolean {
@@ -357,6 +358,8 @@ function CamareroTab() {
   const [productSearch, setProductSearch] = useState('')
   const [activeCategory, setActiveCategory] = useState('bebida')
   const [sending, setSending] = useState(false)
+  const [cancelTargetId, setCancelTargetId] = useState<string | null>(null)
+  const [cancelling, setCancelling] = useState(false)
 
   // Cuenta (bill) state
   const [cuentaTable, setCuentaTable] = useState<TableItem | null>(null)
@@ -494,9 +497,11 @@ function CamareroTab() {
     setView('cuenta')
   }
 
-  const handleCancelOrder = async (orderId: string) => {
+  const handleCancelOrder = async () => {
+    if (!cancelTargetId) return
+    setCancelling(true)
     try {
-      const res = await fetch(`/api/orders/${orderId}`, {
+      const res = await fetch(`/api/orders/${cancelTargetId}`, {
         method: 'PUT',
         headers: authHeaders(),
         body: JSON.stringify({ status: 'cancelled' }),
@@ -505,6 +510,7 @@ function CamareroTab() {
         toast.success('Pedido cancelado')
         if (cuentaTable) fetchCuentaOrders(cuentaTable.id)
         fetchTables()
+        setCancelTargetId(null)
       } else {
         let errorMsg = 'Error al cancelar pedido'
         try {
@@ -516,6 +522,8 @@ function CamareroTab() {
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Error de conexión'
       toast.error(msg)
+    } finally {
+      setCancelling(false)
     }
   }
 
@@ -853,7 +861,7 @@ function CamareroTab() {
                         variant="ghost"
                         size="sm"
                         className="h-7 w-7 p-0 text-red-500 hover:text-red-700 hover:bg-red-50"
-                        onClick={() => handleCancelOrder(order.id)}
+                        onClick={() => setCancelTargetId(order.id)}
                         title="Cancelar pedido"
                       >
                         <XCircle className="size-4" />
@@ -922,6 +930,24 @@ function CamareroTab() {
             </Button>
           </div>
         )}
+
+        {/* Cancel confirmation dialog */}
+        <AlertDialog open={cancelTargetId !== null} onOpenChange={(open) => { if (!open) setCancelTargetId(null) }}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>¿Cancelar pedido?</AlertDialogTitle>
+              <AlertDialogDescription>
+                Se cancelará el pedido. Los productos volverán al stock y la mesa quedará libre si no tiene otros pedidos activos.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel onClick={() => setCancelTargetId(null)}>No, mantener</AlertDialogCancel>
+              <AlertDialogAction className="bg-red-600 hover:bg-red-700 text-white" onClick={handleCancelOrder} disabled={cancelling}>
+                {cancelling ? 'Cancelando...' : 'Sí, cancelar pedido'}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
     )
   }
@@ -1001,8 +1027,6 @@ function CamareroTab() {
     </div>
   )
 }
-
-// ─── COCINA TAB (KDS) ──────────────────────────────────────────────────────
 
 function CocinaTab() {
   const [orders, setOrders] = useState<Order[]>([])
@@ -5651,14 +5675,15 @@ export default function RestaurantPage() {
     { id: 'caja' as TabId, label: 'Caja', icon: <CreditCard className="size-4" /> },
   ]
 
-  // Filter main tabs by permissions
+  // Filter main tabs by role (explicit so barra→only Barra, cocina→only Cocina)
   const visibleMainTabs = mainTabs.filter((tab) => {
     if (!currentUser) return false
+    const role = currentUser.role
     switch (tab.id) {
-      case 'camarero': return clientHasPermission(currentUser.role, 'orders:create')
-      case 'barra': return clientHasPermission(currentUser.role, 'orders:read')
-      case 'cocina': return clientHasPermission(currentUser.role, 'orders:update')
-      case 'caja': return clientHasPermission(currentUser.role, 'orders:pay') || clientHasPermission(currentUser.role, 'cash:read')
+      case 'camarero': return ['super_admin', 'admin', 'encargado', 'camarero'].includes(role)
+      case 'barra': return ['super_admin', 'admin', 'encargado', 'barra'].includes(role)
+      case 'cocina': return ['super_admin', 'admin', 'encargado', 'cocina'].includes(role)
+      case 'caja': return ['super_admin', 'admin', 'encargado', 'caja'].includes(role)
       default: return true
     }
   })

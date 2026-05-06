@@ -55,8 +55,6 @@ export async function GET(request: Request) {
       where.table = { zone: userZone }
     }
 
-    const destination = searchParams.get('destination') // 'bar' or 'kitchen'
-
     const orders = await db.order.findMany({
       where,
       include: {
@@ -76,23 +74,6 @@ export async function GET(request: Request) {
       },
       orderBy: { createdAt: 'desc' },
     })
-
-    // ─── Destination filter: Barra vs Cocina ────────────────
-    // destination=bar     → only items where item.destination === 'bar'
-    // destination=kitchen → only items where item.destination === 'kitchen'
-    // no destination      → return all items (default behavior)
-    if (destination === 'bar' || destination === 'kitchen') {
-      const filteredOrders = orders
-        .map((order) => {
-          const filteredItems = order.items.filter((item) => {
-            return item.destination === destination
-          })
-          return { ...order, items: filteredItems }
-        })
-        .filter((order) => order.items.length > 0) // Exclude orders with no matching items
-
-      return NextResponse.json({ orders: filteredOrders })
-    }
 
     return NextResponse.json({ orders })
   } catch (error) {
@@ -114,6 +95,17 @@ export async function POST(request: Request) {
   // SaaS Subscription Guard: block order creation if restaurant is suspended
   const subCheck = await requireActiveSubscription(restaurantId, user.role)
   if ('error' in subCheck) return subCheck.error
+
+  // ── Block order creation if cash is closed ──
+  const openCashSession = await db.cashSession.findFirst({
+    where: { restaurantId, status: 'open' },
+  })
+  if (!openCashSession) {
+    return NextResponse.json(
+      { error: 'No puedes tomar pedidos: la caja está cerrada.' },
+      { status: 400 }
+    )
+  }
 
   try {
     const body = await request.json()
@@ -179,7 +171,6 @@ export async function POST(request: Request) {
     }
 
     // Calculate subtotals from DB prices only, include modifiers
-    // Set destination per item based on product category and status as pending
     const orderItemsData = items.map((item) => {
       const product = productMap.get(item.productId)!
       const unitPrice = product.price
@@ -191,8 +182,6 @@ export async function POST(request: Request) {
         subtotal,
         notes: item.notes ?? '',
         modifiers: item.modifiers ? JSON.stringify(item.modifiers) : '',
-        status: 'pending' as const,
-        destination: product.category === 'bebida' ? 'bar' as const : 'kitchen' as const,
       }
     })
 

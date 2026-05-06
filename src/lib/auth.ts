@@ -8,9 +8,16 @@ import jwt from 'jsonwebtoken'
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 
-const JWT_SECRET = process.env.JWT_SECRET || 'rst-os-dev-jwt-fallback'
-const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || 'rst-os-dev-refresh-fallback'
-const JWT_EXPIRES_IN = '2h'
+const JWT_SECRET = process.env.JWT_SECRET || ''
+const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || ''
+
+if (!JWT_SECRET) {
+  console.warn('[AUTH] ⚠️ JWT_SECRET is not set. Authentication will not work. Set it in .env or Vercel environment variables.')
+}
+if (!JWT_REFRESH_SECRET) {
+  console.warn('[AUTH] ⚠️ JWT_REFRESH_SECRET is not set. Token refresh will not work. Set it in .env or Vercel environment variables.')
+}
+const JWT_EXPIRES_IN = '8h'
 const JWT_REFRESH_EXPIRES_IN = '7d'
 
 // ─── Rate Limiting (in-memory) ─────────────────────────────
@@ -63,7 +70,7 @@ if (typeof setInterval !== 'undefined') {
 
 // ─── Types ──────────────────────────────────────────────────
 
-export type UserRole = 'super_admin' | 'admin' | 'encargado' | 'camarero' | 'cocina' | 'caja'
+export type UserRole = 'super_admin' | 'admin' | 'encargado' | 'camarero' | 'cocina' | 'barra' | 'caja'
 
 export interface JwtPayload {
   userId: string
@@ -114,7 +121,7 @@ export function verifyRefreshToken(token: string): JwtPayload | null {
 export const ROLE_PERMISSIONS: Record<UserRole, string[]> = {
   super_admin: ['*'], // all permissions
   admin: [
-    'orders:read', 'orders:create', 'orders:update', 'orders:pay',
+    'orders:read', 'orders:create', 'orders:update', 'orders:cancel', 'orders:pay',
     'products:read', 'products:create', 'products:update', 'products:delete',
     'tables:read', 'tables:create', 'tables:update', 'tables:delete',
     'clients:read', 'clients:create', 'clients:update', 'clients:delete',
@@ -125,7 +132,7 @@ export const ROLE_PERMISSIONS: Record<UserRole, string[]> = {
     'audit:read',
   ],
   encargado: [
-    'orders:read', 'orders:create', 'orders:update', 'orders:pay',
+    'orders:read', 'orders:create', 'orders:update', 'orders:cancel', 'orders:pay',
     'products:read', 'products:update',
     'tables:read', 'tables:update',
     'clients:read', 'clients:create', 'clients:update',
@@ -136,7 +143,7 @@ export const ROLE_PERMISSIONS: Record<UserRole, string[]> = {
     'audit:read',
   ],
   camarero: [
-    'orders:read', 'orders:create', 'orders:update', 'orders:pay',
+    'orders:read', 'orders:create', 'orders:update', 'orders:cancel',
     'products:read',
     'tables:read',
     'clients:read', 'clients:create',
@@ -145,8 +152,12 @@ export const ROLE_PERMISSIONS: Record<UserRole, string[]> = {
     'orders:read', 'orders:update', // can mark orders as ready
     'products:read',
   ],
+  barra: [
+    'orders:read', 'orders:update', // can mark bar items as ready
+    'products:read',
+  ],
   caja: [
-    'orders:read', 'orders:update', 'orders:pay',
+    'orders:read', 'orders:update', 'orders:cancel', 'orders:pay',
     'products:read',
     'tables:read',
     'clients:read',
@@ -170,9 +181,9 @@ export function canAccessTab(role: UserRole, tab: string): boolean {
     case 'cocina':
       return ['super_admin', 'admin', 'encargado', 'cocina'].includes(role)
     case 'barra':
-      return ['super_admin', 'admin', 'encargado', 'caja', 'camarero'].includes(role)
+      return ['super_admin', 'admin', 'encargado', 'barra'].includes(role)
     case 'caja':
-      return ['super_admin', 'admin', 'encargado', 'caja', 'camarero'].includes(role)
+      return ['super_admin', 'admin', 'encargado', 'caja'].includes(role)
     case 'reportes':
       return ['super_admin', 'admin', 'encargado'].includes(role)
     case 'dashboard':

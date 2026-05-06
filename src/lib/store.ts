@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 
-export type TabId = 'camarero' | 'cocina' | 'barra' | 'caja' | 'dashboard' | 'products' | 'tables' | 'orders' | 'clients' | 'reportes' | 'restaurantes' | 'users'
+export type TabId = 'camarero' | 'cocina' | 'barra' | 'caja' | 'dashboard' | 'products' | 'tables' | 'orders' | 'clients' | 'reportes' | 'restaurants' | 'users' | 'audit'
 
 export interface Notification {
   id: string
@@ -22,6 +22,10 @@ interface RestaurantStore {
   // Active tab
   activeTab: TabId
   setActiveTab: (tab: TabId) => void
+
+  // Super admin: selected restaurant context
+  selectedRestaurantId: string | null
+  setSelectedRestaurantId: (id: string | null) => void
 
   // Real-time notifications
   notifications: Notification[]
@@ -52,6 +56,10 @@ export const useRestaurantStore = create<RestaurantStore>((set) => ({
   // Active tab - default to camarero (main screen)
   activeTab: 'camarero',
   setActiveTab: (tab) => set({ activeTab: tab }),
+
+  // Super admin restaurant context
+  selectedRestaurantId: null,
+  setSelectedRestaurantId: (id) => set({ selectedRestaurantId: id }),
 
   // Real-time notifications
   notifications: [],
