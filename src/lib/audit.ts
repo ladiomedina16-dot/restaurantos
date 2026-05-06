@@ -24,6 +24,8 @@ export type AuditAction =
   | 'user_created'
   | 'user_updated'
   | 'user_deactivated'
+  | 'user_deleted'
+  | 'restaurant_deleted'
   | 'login_success'
   | 'login_failed'
   | 'print_ticket'
@@ -31,10 +33,8 @@ export type AuditAction =
   | 'password_reset'
   | 'onboarding_completed'
   | 'subscription_changed'
-  | 'restaurant_deleted'
   | 'supplier_payment_created'
-  | 'user_deleted'
-  | 'user_password_reset'
+  
 
 export type EntityType =
   | 'order'

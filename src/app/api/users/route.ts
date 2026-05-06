@@ -5,6 +5,7 @@
 // PUT  /api/users       → Update user active status (deactivation)
 // v4: Multi-restaurant scoping, Zod validation, audit logging
 // v5: mustChangePassword on creation, active toggle, deactivation audit
+// v6: Fixed username uniqueness check (per-restaurant + global super_admin)
 // ============================================================
 
 import { db } from '@/lib/db'
@@ -110,15 +111,6 @@ export async function POST(request: Request) {
       )
     }
 
-    // ─── Check username uniqueness ───────────────────────
-    const existing = await db.user.findUnique({ where: { username } })
-    if (existing) {
-      return NextResponse.json(
-        { error: 'El nombre de usuario ya existe' },
-        { status: 409 }
-      )
-    }
-
     // ─── Determine restaurantId for new user ─────────────
     // super_admin can specify restaurantId explicitly
     // Non-super_admin users inherit the creator's restaurantId
@@ -129,6 +121,31 @@ export async function POST(request: Request) {
     } else {
       // Non-super_admin: user is assigned to their restaurant
       targetRestaurantId = user.restaurantId ?? null
+    }
+
+    // ─── Check username uniqueness ───────────────────────
+    // 1. Check global super_admin uniqueness (restaurantId=null)
+    const existingSuperAdmin = await db.user.findFirst({
+      where: { username, restaurantId: null },
+    })
+    if (existingSuperAdmin) {
+      return NextResponse.json(
+        { error: 'El nombre de usuario ya existe como super_admin' },
+        { status: 409 }
+      )
+    }
+
+    // 2. Check per-restaurant uniqueness
+    if (targetRestaurantId) {
+      const existingInRestaurant = await db.user.findFirst({
+        where: { username, restaurantId: targetRestaurantId },
+      })
+      if (existingInRestaurant) {
+        return NextResponse.json(
+          { error: 'El nombre de usuario ya existe en este restaurante' },
+          { status: 409 }
+        )
+      }
     }
 
     const passwordHash = await hashPassword(password)
@@ -187,19 +204,11 @@ export async function PUT(request: Request) {
 
   try {
     const body = await request.json()
-    const targetUserId = body.id as string | undefined
-
-    if (!targetUserId) {
-      return NextResponse.json(
-        { error: 'ID de usuario requerido.' },
-        { status: 400 }
-      )
-    }
 
     const validation = validateInput(updateUserStatusSchema, body)
     if (!validation.success) return validation.error
 
-    const { active } = validation.data
+    const { id: targetUserId, active } = validation.data
 
     // Fetch target user
     const targetUser = await db.user.findUnique({

@@ -318,11 +318,11 @@ async function cashClosesReport(restaurantId: string, dateFrom: Date, dateTo: Da
       id: sp.id,
       concept: sp.concept,
       amount: sp.amount,
-      registeredBy: sp.user.name || sp.user.username,
+      registeredBy: sp.user ? (sp.user.name || sp.user.username) : 'Usuario eliminado',
       createdAt: sp.createdAt,
     })),
     difference: s.difference ?? 0,
-    openedBy: s.openedBy.username,
+    openedBy: s.openedBy?.username ?? 'Usuario eliminado',
     closedBy: s.closedBy?.username ?? '',
   }))
 
@@ -480,7 +480,7 @@ async function supplierPaymentsReport(restaurantId: string, dateFrom: Date, date
     id: sp.id,
     concept: sp.concept,
     amount: sp.amount,
-    registeredBy: sp.user.name || sp.user.username,
+    registeredBy: sp.user ? (sp.user.name || sp.user.username) : 'Usuario eliminado',
     cashSessionId: sp.cashSessionId,
     cashSessionOpenedAt: sp.cashSession.openedAt,
     createdAt: sp.createdAt,

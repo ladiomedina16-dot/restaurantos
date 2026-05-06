@@ -252,7 +252,7 @@ interface DashboardData {
     id: string
     openedAt: string
     openingCash: number
-    openedBy: { id: string; username: string; name: string; role: string }
+    openedBy: { id: string; username: string; name: string; role: string } | null
   } | null
   cashSessionOpen: boolean
   topProducts: { productId: string; name: string; totalQuantity: number; totalRevenue: number }[]
@@ -1926,7 +1926,8 @@ function CajaTab() {
                 <p className="text-sm text-muted-foreground">
                   Apertura: {formatEUR(cashSession.openingCash)} ·
                   Iniciada: {formatTime(cashSession.openedAt)}
-                  {cashSession.openedBy && ` · Por: ${cashSession.openedBy.name ?? cashSession.openedBy.username ?? ''}`}
+                  {cashSession.openedBy && ` · Por: ${cashSession.openedBy.name ?? cashSession.openedBy.username ?? 'Usuario eliminado'}`}
+                  {!cashSession.openedBy && ' · Por: Usuario eliminado'}
                 </p>
               </div>
               <Button
@@ -2019,7 +2020,7 @@ function CajaTab() {
                       <div>
                         <span className="font-medium">{sp.concept}</span>
                         <span className="text-muted-foreground ml-2 text-xs">
-                          {sp.user?.name || sp.user?.username} · {formatTime(sp.createdAt)}
+                          {sp.user?.name || sp.user?.username || 'Usuario eliminado'} · {formatTime(sp.createdAt)}
                         </span>
                       </div>
                       <span className="font-bold text-orange-700">{formatEUR(sp.amount)}</span>
@@ -3910,7 +3911,7 @@ function DashboardTab({ overrideRestaurantId }: { overrideRestaurantId?: string 
             <div className="flex-1">
               <p className="font-semibold text-green-900">Caja abierta</p>
               <p className="text-sm text-green-700">
-                Abierta por {cashSession.openedBy?.name || cashSession.openedBy?.username || '?'} · {timeAgo(cashSession.openedAt)} · Fondo: {formatEUR(cashSession.openingCash)}
+                Abierta por {cashSession.openedBy?.name || cashSession.openedBy?.username || 'Usuario eliminado'} · {timeAgo(cashSession.openedAt)} · Fondo: {formatEUR(cashSession.openingCash)}
               </p>
             </div>
           </CardContent>
@@ -4278,7 +4279,7 @@ function UsersTab({ overrideRestaurantId }: { overrideRestaurantId?: string } = 
       })
       if (handleFetchResponse(res) && res.ok) {
         const data = await res.json()
-        toast.success(data.deleted ? 'Usuario eliminado permanentemente' : 'Usuario desactivado (tiene datos relacionados)')
+        toast.success('Usuario eliminado permanentemente')
         setDeleteTarget(null)
         fetchUsers()
       } else {
@@ -4514,7 +4515,7 @@ function UsersTab({ overrideRestaurantId }: { overrideRestaurantId?: string } = 
                 <>
                   ¿Estás seguro de que deseas eliminar a <strong>{deleteTarget.name}</strong> (@{deleteTarget.username})?
                   <br /><br />
-                  Si el usuario tiene pedidos o pagos asociados, será desactivado en lugar de eliminado.
+                  El usuario será eliminado permanentemente de la base de datos. Los pedidos y pagos históricos se conservarán.
                 </>
               )}
             </AlertDialogDescription>
