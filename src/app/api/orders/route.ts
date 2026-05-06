@@ -3,6 +3,8 @@
 // GET  /api/orders       → List orders (requires orders:read)
 // POST /api/orders       → Create order (requires orders:create)
 // Multi-restaurant scoped, Zod validated, audit logged
+// v5: destination calculated by backend (bebida→bar, else→kitchen)
+//     cancelledBy included in GET responses
 // ============================================================
 
 import { db } from '@/lib/db'
@@ -12,6 +14,26 @@ import { validateInput, createOrderSchema } from '@/lib/validations'
 import { createAuditLog } from '@/lib/audit'
 import { handleApiError } from '@/lib/errors'
 import { emitOrderCreated } from '@/lib/realtime'
+
+// ─── Shared include for order queries ──────────────────────────
+const orderInclude = {
+  table: true,
+  client: true,
+  items: {
+    include: {
+      product: true,
+    },
+  },
+  createdBy: {
+    select: { id: true, username: true, name: true, role: true },
+  },
+  finishedBy: {
+    select: { id: true, username: true, name: true, role: true },
+  },
+  cancelledBy: {
+    select: { id: true, username: true, name: true, role: true },
+  },
+}
 
 // ─── GET /api/orders ────────────────────────────────────────
 
@@ -29,6 +51,7 @@ export async function GET(request: Request) {
     const status = searchParams.get('status')
     const tableId = searchParams.get('tableId')
     const clientId = searchParams.get('clientId')
+    const destination = searchParams.get('destination') // bar | kitchen — filter by item destination
 
     const where: Record<string, unknown> = { restaurantId }
 
@@ -55,25 +78,38 @@ export async function GET(request: Request) {
       where.table = { zone: userZone }
     }
 
+    // Destination filtering: only return orders that have items with the matching destination
+    // that are NOT yet ready (pending items for that destination)
+    if (destination === 'bar' || destination === 'kitchen') {
+      where.items = {
+        some: {
+          destination,
+          status: { not: 'ready' }, // only pending items for this destination
+        },
+      }
+    }
+
     const orders = await db.order.findMany({
       where,
-      include: {
-        table: true,
-        client: true,
-        items: {
-          include: {
-            product: true,
-          },
-        },
-        createdBy: {
-          select: { id: true, username: true, name: true, role: true },
-        },
-        finishedBy: {
-          select: { id: true, username: true, name: true, role: true },
-        },
-      },
+      include: orderInclude,
       orderBy: { createdAt: 'desc' },
     })
+
+    // PUNTO 1: When destination is specified, filter items to ONLY include
+    // items matching that destination with status !== 'ready'.
+    // This prevents Barra from seeing cocina items and vice versa.
+    if (destination === 'bar' || destination === 'kitchen') {
+      const filteredOrders = orders
+        .map((order) => ({
+          ...order,
+          items: order.items.filter(
+            (item) => item.destination === destination && item.status !== 'ready'
+          ),
+        }))
+        .filter((order) => order.items.length > 0) // Remove orders with no matching items
+
+      return NextResponse.json({ orders: filteredOrders })
+    }
 
     return NextResponse.json({ orders })
   } catch (error) {
@@ -95,17 +131,6 @@ export async function POST(request: Request) {
   // SaaS Subscription Guard: block order creation if restaurant is suspended
   const subCheck = await requireActiveSubscription(restaurantId, user.role)
   if ('error' in subCheck) return subCheck.error
-
-  // ── Block order creation if cash is closed ──
-  const openCashSession = await db.cashSession.findFirst({
-    where: { restaurantId, status: 'open' },
-  })
-  if (!openCashSession) {
-    return NextResponse.json(
-      { error: 'No puedes tomar pedidos: la caja está cerrada.' },
-      { status: 400 }
-    )
-  }
 
   try {
     const body = await request.json()
@@ -171,10 +196,13 @@ export async function POST(request: Request) {
     }
 
     // Calculate subtotals from DB prices only, include modifiers
+    // Backend calculates destination based on product category:
+    //   bebida → "bar", everything else → "kitchen"
     const orderItemsData = items.map((item) => {
       const product = productMap.get(item.productId)!
       const unitPrice = product.price
       const subtotal = unitPrice * item.quantity
+      const destination = product.category === 'bebida' ? 'bar' : 'kitchen'
       return {
         productId: item.productId,
         quantity: item.quantity,
@@ -182,6 +210,8 @@ export async function POST(request: Request) {
         subtotal,
         notes: item.notes ?? '',
         modifiers: item.modifiers ? JSON.stringify(item.modifiers) : '',
+        destination,
+        status: 'pending',
       }
     })
 

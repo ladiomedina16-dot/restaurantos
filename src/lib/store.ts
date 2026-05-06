@@ -44,7 +44,6 @@ interface RestaurantStore {
   addOrderItem: (item: OrderItem) => void
   removeOrderItem: (productId: string) => void
   updateOrderItemQuantity: (productId: string, quantity: number) => void
-  updateOrderItemNotes: (productId: string, notes: string) => void
   clearOrderItems: () => void
   setSelectedTableId: (id: string) => void
   setSelectedClientId: (id: string) => void
@@ -117,12 +116,6 @@ export const useRestaurantStore = create<RestaurantStore>((set) => ({
           : state.currentOrderItems.map((i) =>
               i.productId === productId ? { ...i, quantity } : i
             ),
-    })),
-  updateOrderItemNotes: (productId, notes) =>
-    set((state) => ({
-      currentOrderItems: state.currentOrderItems.map((i) =>
-        i.productId === productId ? { ...i, notes } : i
-      ),
     })),
   clearOrderItems: () => set({ currentOrderItems: [] }),
   setSelectedTableId: (id) => set({ selectedTableId: id }),
