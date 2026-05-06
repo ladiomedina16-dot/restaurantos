@@ -5696,7 +5696,11 @@ export default function RestaurantPage() {
         <Card className="w-full max-w-sm rounded-2xl shadow-xl">
           <CardHeader className="text-center pb-2">
             <div className="mx-auto flex size-16 items-center justify-center rounded-full bg-amber-100 mb-3">
-              <Flame className="size-8 text-amber-600" />
+              <img
+  src="/brand/restaurantos-logo.png"
+  alt="RestaurantOS"
+  className="h-16 w-16 rounded-2xl object-contain"
+/>
             </div>
             <CardTitle className="text-2xl font-bold text-amber-800">RestaurantOS</CardTitle>
             <p className="text-sm text-muted-foreground mt-1">Inicia sesión para continuar</p>
@@ -5833,7 +5837,11 @@ export default function RestaurantPage() {
         <header className="border-b bg-white sticky top-0 z-50">
           <div className="max-w-[1400px] mx-auto flex items-center justify-between px-4 py-2">
             <div className="flex items-center gap-2">
-              <Flame className="size-6 text-amber-600" />
+              <img
+  src="/brand/restaurantos-logo.png"
+  alt="RestaurantOS"
+  className="h-9 w-9 rounded-xl object-contain"
+/>
               <span className="font-bold text-lg hidden sm:inline">RestaurantOS</span>
             </div>
             <div className="flex items-center gap-2">
