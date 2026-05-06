@@ -3804,6 +3804,7 @@ const roleLabels: Record<string, string> = {
   encargado: 'Encargado',
   camarero: 'Camarero',
   cocina: 'Cocina',
+  barra: 'Barra',
   caja: 'Caja',
 }
 
@@ -3813,6 +3814,7 @@ const roleColors: Record<string, string> = {
   encargado: 'bg-blue-100 text-blue-800 border-blue-200',
   camarero: 'bg-green-100 text-green-800 border-green-200',
   cocina: 'bg-orange-100 text-orange-800 border-orange-200',
+  barra: 'bg-amber-100 text-amber-800 border-amber-200',
   caja: 'bg-amber-100 text-amber-800 border-amber-200',
 }
 
@@ -4280,8 +4282,12 @@ function UsersTab({ overrideRestaurantId }: { overrideRestaurantId?: string } = 
         setDeleteTarget(null)
         fetchUsers()
       } else {
-        const err = await res.json()
-        toast.error(err.error || 'Error al eliminar usuario')
+        let errorMsg = 'Error al eliminar usuario'
+        try {
+          const err = await res.json()
+          errorMsg = err.error || errorMsg
+        } catch { /* response not JSON */ }
+        toast.error(errorMsg)
       }
     } catch {
       toast.error('Error de red')
@@ -4437,6 +4443,7 @@ function UsersTab({ overrideRestaurantId }: { overrideRestaurantId?: string } = 
                   <SelectItem value="encargado">Encargado</SelectItem>
                   <SelectItem value="camarero">Camarero</SelectItem>
                   <SelectItem value="cocina">Cocina</SelectItem>
+                  <SelectItem value="barra">Barra</SelectItem>
                   <SelectItem value="caja">Caja</SelectItem>
                 </SelectContent>
               </Select>

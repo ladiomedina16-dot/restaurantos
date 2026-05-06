@@ -33,6 +33,7 @@ export type AuditAction =
   | 'subscription_changed'
   | 'restaurant_deleted'
   | 'supplier_payment_created'
+  | 'user_deleted'
 
 export type EntityType =
   | 'order'
