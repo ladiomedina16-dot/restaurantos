@@ -191,12 +191,17 @@ interface Order {
   notes: string
   createdById?: string | null
   finishedById?: string | null
+  cancelledById?: string | null
+  cancelledAt?: string | null
   createdAt: string
   updatedAt: string
   table: { id: string; number: number; zone: string }
   client: { id: string; name: string; phone: string; points?: number; visits?: number } | null
   items: OrderItemDetail[]
   _count?: { items: number }
+  createdBy?: { id: string; username: string; name: string; role: string } | null
+  finishedBy?: { id: string; username: string; name: string; role: string } | null
+  cancelledBy?: { id: string; username: string; name: string; role: string } | null
 }
 
 interface Client {
@@ -5112,6 +5117,9 @@ function OrdersTab({ overrideRestaurantId }: { overrideRestaurantId?: string } =
                         </div>
                         <p className="text-xs text-muted-foreground mt-0.5">
                           {order.items.length} items · {timeAgo(order.createdAt)}
+                          {order.status === 'cancelled' && (
+                            <> · <span className="text-red-600">Cancelado por: {order.cancelledBy?.name || order.cancelledBy?.username || 'Usuario eliminado'}</span></>
+                          )}
                         </p>
                       </div>
                     </div>
@@ -5192,6 +5200,16 @@ function OrdersTab({ overrideRestaurantId }: { overrideRestaurantId?: string } =
                 <div className="text-sm">
                   <span className="text-muted-foreground">Notas: </span>
                   {selectedOrder.notes}
+                </div>
+              )}
+
+              {/* Cancelled by */}
+              {selectedOrder.status === 'cancelled' && (
+                <div className="text-sm bg-red-50 rounded-lg p-3">
+                  <span className="text-red-600 font-medium">Cancelado por: {selectedOrder.cancelledBy?.name || selectedOrder.cancelledBy?.username || 'Usuario eliminado'}</span>
+                  {selectedOrder.cancelledAt && (
+                    <span className="text-red-500 text-xs ml-2">({new Date(selectedOrder.cancelledAt).toLocaleString('es-ES')})</span>
+                  )}
                 </div>
               )}
 
