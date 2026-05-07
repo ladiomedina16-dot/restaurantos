@@ -39,11 +39,19 @@ const orderInclude = {
 
 export async function GET(request: Request) {
   const auth = authenticateAndAuthorize(request, 'orders:read')
-  if ('error' in auth) return auth.error
+  if ('error' in auth) {
+    console.log('[Orders GET] ❌ authenticateAndAuthorize FAILED — no permission or bad token')
+    return auth.error
+  }
   const { user } = auth
 
+  console.log(`[Orders GET] User: role=${user.role}, restaurantId=${user.restaurantId ?? 'MISSING'}, zone=${user.zone ?? 'none'}`)
+
   const scope = requireRestaurantScope(user, request)
-  if ('error' in scope) return scope.error
+  if ('error' in scope) {
+    console.log(`[Orders GET] ❌ requireRestaurantScope FAILED — user.restaurantId=${user.restaurantId ?? 'MISSING'}`)
+    return scope.error
+  }
   const { restaurantId } = scope
 
   try {
@@ -52,6 +60,8 @@ export async function GET(request: Request) {
     const tableId = searchParams.get('tableId')
     const clientId = searchParams.get('clientId')
     const destination = searchParams.get('destination') // bar | kitchen — filter by item destination
+
+    console.log(`[Orders GET] Params: status=${status}, destination=${destination}, tableId=${tableId}, clientId=${clientId}, restaurantId=${restaurantId}`)
 
     const where: Record<string, unknown> = { restaurantId }
 
@@ -77,6 +87,7 @@ export async function GET(request: Request) {
     if (userZone) {
       where.table = { zone: userZone }
     }
+    console.log(`[Orders GET] Zone filter: ${userZone ?? 'none (all zones)'} — getZoneFilter returned: ${userZone ?? 'null'}`)
 
     // Destination filtering: only return orders that have items with the matching destination
     // that are NOT yet ready (pending items for that destination)
@@ -89,10 +100,20 @@ export async function GET(request: Request) {
       }
     }
 
+    console.log(`[Orders GET] Prisma where:`, JSON.stringify(where, null, 2))
+
     const orders = await db.order.findMany({
       where,
       include: orderInclude,
       orderBy: { createdAt: 'desc' },
+    })
+
+    console.log(`[Orders GET] Raw results: ${orders.length} orders found`)
+    // Log each order's items for debugging
+    orders.forEach((order) => {
+      console.log(`[Orders GET]   Order ${order.id}: status=${order.status}, table=${order.table?.number}, items=${order.items.length}`,
+        order.items.map((i) => ({ id: i.id, name: i.product?.name, dest: i.destination, status: i.status }))
+      )
     })
 
     // Debug: log when destination filter is used and results are unexpected
@@ -104,7 +125,7 @@ export async function GET(request: Request) {
       const totalItems = await db.orderItem.count({
         where: { destination, status: { not: 'ready' }, order: { restaurantId } },
       })
-      console.log(`[Orders GET] destination=${destination}: 0 results. Total active orders: ${totalOrders}, Total ${destination} pending items: ${totalItems}`)
+      console.log(`[Orders GET] ⚠️ destination=${destination}: 0 results. Total active orders: ${totalOrders}, Total ${destination} pending items: ${totalItems}`)
     }
 
     // PUNTO 1: When destination is specified, filter items to ONLY include
@@ -120,11 +141,13 @@ export async function GET(request: Request) {
         }))
         .filter((order) => order.items.length > 0) // Remove orders with no matching items
 
+      console.log(`[Orders GET] After item-level filter: ${filteredOrders.length} orders with ${destination} items`)
       return NextResponse.json({ orders: filteredOrders })
     }
 
     return NextResponse.json({ orders })
   } catch (error) {
+    console.error(`[Orders GET] ❌ Error:`, error)
     return handleApiError('Orders GET', error)
   }
 }
@@ -156,26 +179,10 @@ export async function POST(request: Request) {
     const table = await db.table.findFirst({
       where: { id: tableId, restaurantId },
     })
-
     if (!table) {
       return NextResponse.json(
         { error: 'Table not found' },
         { status: 404 }
-      )
-    }
-
-    // Require open cash session before taking orders
-    const openSession = await db.cashSession.findFirst({
-      where: {
-        restaurantId,
-        status: 'open',
-      },
-    })
-
-    if (!openSession) {
-      return NextResponse.json(
-        { error: 'Debes abrir caja antes de tomar pedidos.' },
-        { status: 400 }
       )
     }
 

@@ -121,7 +121,7 @@ export function verifyRefreshToken(token: string): JwtPayload | null {
 export const ROLE_PERMISSIONS: Record<UserRole, string[]> = {
   super_admin: ['*'], // all permissions
   admin: [
-    'orders:read', 'orders:create', 'orders:update', 'orders:cancel', 'orders:pay',
+    'orders:read', 'orders:create', 'orders:update', 'orders:pay',
     'products:read', 'products:create', 'products:update', 'products:delete',
     'tables:read', 'tables:create', 'tables:update', 'tables:delete',
     'clients:read', 'clients:create', 'clients:update', 'clients:delete',
@@ -132,7 +132,7 @@ export const ROLE_PERMISSIONS: Record<UserRole, string[]> = {
     'audit:read',
   ],
   encargado: [
-    'orders:read', 'orders:create', 'orders:update', 'orders:cancel', 'orders:pay',
+    'orders:read', 'orders:create', 'orders:update', 'orders:pay',
     'products:read', 'products:update',
     'tables:read', 'tables:update',
     'clients:read', 'clients:create', 'clients:update',
@@ -143,7 +143,7 @@ export const ROLE_PERMISSIONS: Record<UserRole, string[]> = {
     'audit:read',
   ],
   camarero: [
-    'orders:read', 'orders:create', 'orders:update', 'orders:cancel',
+    'orders:read', 'orders:create', 'orders:cancel',
     'products:read',
     'tables:read',
     'clients:read', 'clients:create',
@@ -157,7 +157,7 @@ export const ROLE_PERMISSIONS: Record<UserRole, string[]> = {
     'products:read',
   ],
   caja: [
-    'orders:read', 'orders:update', 'orders:cancel', 'orders:pay',
+    'orders:read', 'orders:pay',
     'products:read',
     'tables:read',
     'clients:read',
@@ -178,10 +178,10 @@ export function canAccessTab(role: UserRole, tab: string): boolean {
   switch (tab) {
     case 'camarero':
       return ['super_admin', 'admin', 'encargado', 'camarero'].includes(role)
-    case 'cocina':
-      return ['super_admin', 'admin', 'encargado', 'cocina'].includes(role)
     case 'barra':
       return ['super_admin', 'admin', 'encargado', 'barra'].includes(role)
+    case 'cocina':
+      return ['super_admin', 'admin', 'encargado', 'cocina'].includes(role)
     case 'caja':
       return ['super_admin', 'admin', 'encargado', 'caja'].includes(role)
     case 'reportes':

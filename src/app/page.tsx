@@ -423,12 +423,25 @@ function CamareroTab() {
   // Fetch existing orders for the currently selected table
   const fetchTableOrders = useCallback(async (tableId: string) => {
     try {
-      const res = await fetch(`/api/orders?status=pending,in_progress,ready,served&tableId=${tableId}`, { headers: authHeaders(false) })
+      const url = `/api/orders?status=pending,in_progress,ready,served&tableId=${tableId}`
+      console.log('[Camarero] fetchTableOrders:', url)
+      const res = await fetch(url, { headers: authHeaders(false) })
+      console.log('[Camarero] fetchTableOrders response:', res.status)
       if (handleFetchResponse(res) && res.ok) {
         const json = await res.json()
+        console.log('[Camarero] fetchTableOrders got:', json.orders?.length, 'orders')
+        json.orders?.forEach((o: Order) => {
+          console.log(`[Camarero]   Order ${o.id}: status=${o.status}, items=${o.items.length}`, 
+            o.items.map((i) => ({ name: i.product?.name, dest: i.destination, status: i.status })))
+        })
         setTableOrders(json.orders)
+      } else {
+        const errText = await res.text().catch(() => '')
+        console.error('[Camarero] fetchTableOrders failed:', res.status, errText)
       }
-    } catch { /* silently fail */ }
+    } catch (err) {
+      console.error('[Camarero] fetchTableOrders error:', err)
+    }
   }, [authHeaders, handleFetchResponse])
 
   useEffect(() => {
@@ -1148,22 +1161,40 @@ function CocinaTab() {
   const fetchOrders = useCallback(async () => {
     try {
       // destination=kitchen filters to kitchen items — show pending + in_progress orders
-      const res = await fetch('/api/orders?status=pending,in_progress&destination=kitchen', { headers: authHeaders(false) })
+      const url = '/api/orders?status=pending,in_progress&destination=kitchen'
+      console.log('[Cocina] Fetching:', url)
+      console.log('[Cocina] Auth headers:', { hasToken: !!authHeaders(false)['Authorization'], restaurantId: authHeaders(false)['X-Restaurant-Id'] ?? 'MISSING' })
+      const res = await fetch(url, { headers: authHeaders(false) })
+      console.log('[Cocina] API response status:', res.status, res.statusText)
       if (handleFetchResponse(res) && res.ok) {
         const json = await res.json()
-        // Filter out orders where ALL kitchen items are already ready
+        console.log('[Cocina] API returned:', json.orders?.length, 'orders')
+        // Log each order and its items
+        ;(json.orders as Order[]).forEach((order: Order) => {
+          console.log(`[Cocina]   Order ${order.id}: status=${order.status}, table=${order.table?.number}, items=${order.items.length}`, 
+            order.items.map((i) => ({ name: i.product?.name, dest: i.destination, status: i.status })))
+        })
+        // Filter out orders where ALL kitchen items are already ready (backend already filters, but double-check)
         const filtered = (json.orders as Order[]).filter((order) => {
           const kitchenItems = order.items.filter((i) => i.destination === 'kitchen')
-          return kitchenItems.some((i) => i.status !== 'ready')
+          const hasPending = kitchenItems.some((i) => i.status !== 'ready')
+          console.log(`[Cocina]   Order ${order.id}: kitchenItems=${kitchenItems.length}, hasPending=${hasPending}`)
+          return hasPending
         })
-        console.log('[Cocina] Fetched:', json.orders?.length, 'orders → filtered:', filtered.length)
+        console.log('[Cocina] Final filtered:', filtered.length, 'orders')
         setOrders(filtered)
-      } else if (res.status !== 401) {
+      } else {
         const errText = await res.text().catch(() => '')
         console.error('[Cocina] Fetch failed:', res.status, errText)
+        if (res.status === 403) {
+          toast.error('Sin permiso para ver pedidos. Contacte al administrador.')
+        } else if (res.status !== 401) {
+          toast.error(`Error al cargar pedidos (${res.status})`)
+        }
       }
     } catch (err) {
       console.error('[Cocina] Fetch error:', err)
+      toast.error('Error de red al cargar pedidos')
     } finally {
       setLoading(false)
     }
@@ -1376,22 +1407,40 @@ function BarraTab() {
 
   const fetchOrders = useCallback(async () => {
     try {
-      const res = await fetch('/api/orders?status=pending,in_progress&destination=bar', { headers: authHeaders(false) })
+      const url = '/api/orders?status=pending,in_progress&destination=bar'
+      console.log('[Barra] Fetching:', url)
+      console.log('[Barra] Auth headers:', { hasToken: !!authHeaders(false)['Authorization'], restaurantId: authHeaders(false)['X-Restaurant-Id'] ?? 'MISSING' })
+      const res = await fetch(url, { headers: authHeaders(false) })
+      console.log('[Barra] API response status:', res.status, res.statusText)
       if (handleFetchResponse(res) && res.ok) {
         const json = await res.json()
-        // Filter out orders where ALL bar items are already ready
+        console.log('[Barra] API returned:', json.orders?.length, 'orders')
+        // Log each order and its items
+        ;(json.orders as Order[]).forEach((order: Order) => {
+          console.log(`[Barra]   Order ${order.id}: status=${order.status}, table=${order.table?.number}, items=${order.items.length}`, 
+            order.items.map((i) => ({ name: i.product?.name, dest: i.destination, status: i.status })))
+        })
+        // Filter out orders where ALL bar items are already ready (backend already filters, but double-check)
         const filtered = (json.orders as Order[]).filter((order) => {
           const barItems = order.items.filter((i) => i.destination === 'bar')
-          return barItems.some((i) => i.status !== 'ready')
+          const hasPending = barItems.some((i) => i.status !== 'ready')
+          console.log(`[Barra]   Order ${order.id}: barItems=${barItems.length}, hasPending=${hasPending}`)
+          return hasPending
         })
-        console.log('[Barra] Fetched:', json.orders?.length, 'orders → filtered:', filtered.length)
+        console.log('[Barra] Final filtered:', filtered.length, 'orders')
         setOrders(filtered)
-      } else if (res.status !== 401) {
+      } else {
         const errText = await res.text().catch(() => '')
         console.error('[Barra] Fetch failed:', res.status, errText)
+        if (res.status === 403) {
+          toast.error('Sin permiso para ver pedidos. Contacte al administrador.')
+        } else if (res.status !== 401) {
+          toast.error(`Error al cargar pedidos (${res.status})`)
+        }
       }
     } catch (err) {
       console.error('[Barra] Fetch error:', err)
+      toast.error('Error de red al cargar pedidos')
     } finally {
       setLoading(false)
     }
