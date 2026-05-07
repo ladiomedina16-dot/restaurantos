@@ -95,6 +95,18 @@ export async function GET(request: Request) {
       orderBy: { createdAt: 'desc' },
     })
 
+    // Debug: log when destination filter is used and results are unexpected
+    if (destination && orders.length === 0) {
+      // Check if there are ANY orders for this restaurant (to distinguish "no orders" from "no matching orders")
+      const totalOrders = await db.order.count({
+        where: { restaurantId, status: { in: ['pending', 'in_progress'] } },
+      })
+      const totalItems = await db.orderItem.count({
+        where: { destination, status: { not: 'ready' }, order: { restaurantId } },
+      })
+      console.log(`[Orders GET] destination=${destination}: 0 results. Total active orders: ${totalOrders}, Total ${destination} pending items: ${totalItems}`)
+    }
+
     // PUNTO 1: When destination is specified, filter items to ONLY include
     // items matching that destination with status !== 'ready'.
     // This prevents Barra from seeing cocina items and vice versa.
@@ -216,6 +228,9 @@ export async function POST(request: Request) {
     })
 
     const subtotal = orderItemsData.reduce((sum, item) => sum + item.subtotal, 0)
+
+    // Debug: log item destinations to verify backend calculation
+    console.log('[Orders POST] Item destinations:', orderItemsData.map(i => ({ productId: i.productId, destination: i.destination, status: i.status })))
 
     // Use transaction to ensure atomicity
     const order = await db.$transaction(async (tx) => {

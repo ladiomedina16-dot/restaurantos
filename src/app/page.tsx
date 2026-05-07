@@ -737,8 +737,8 @@ function CamareroTab() {
 
         {/* Order summary bar */}
         {currentOrderItems.length > 0 && (
-          <div className="border-t bg-amber-50 p-3">
-            <ScrollArea className="max-h-48 mb-2">
+          <div className="border-t bg-amber-50 flex flex-col max-h-[55vh] md:max-h-[45vh] shrink-0">
+            <ScrollArea className="flex-1 overflow-y-auto p-3 pb-1">
               <div className="space-y-2">
                 {currentOrderItems.map((item) => (
                   <div key={item.productId} className="flex items-start justify-between text-sm">
@@ -783,7 +783,7 @@ function CamareroTab() {
                 ))}
               </div>
             </ScrollArea>
-            <div className="flex items-center justify-between pt-2 border-t">
+            <div className="flex items-center justify-between p-3 pt-2 border-t shrink-0">
               <div>
                 <span className="text-sm text-muted-foreground">{currentOrderItems.length} items</span>
                 <span className="ml-3 text-xl font-bold text-amber-800">{formatEUR(currentTotal)}</span>
@@ -1052,8 +1052,12 @@ function CocinaTab() {
           return kitchenItems.some((i) => i.status !== 'ready')
         })
         setOrders(filtered)
+      } else if (res.status !== 401) {
+        console.error('[Cocina] Fetch failed:', res.status, await res.text().catch(() => ''))
       }
-    } catch { /* silently fail */ } finally {
+    } catch (err) {
+      console.error('[Cocina] Fetch error:', err)
+    } finally {
       setLoading(false)
     }
   }, [authHeaders, handleFetchResponse])
@@ -1274,8 +1278,12 @@ function BarraTab() {
           return barItems.some((i) => i.status !== 'ready')
         })
         setOrders(filtered)
+      } else if (res.status !== 401) {
+        console.error('[Barra] Fetch failed:', res.status, await res.text().catch(() => ''))
       }
-    } catch { /* silently fail */ } finally {
+    } catch (err) {
+      console.error('[Barra] Fetch error:', err)
+    } finally {
       setLoading(false)
     }
   }, [authHeaders, handleFetchResponse])
