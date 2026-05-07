@@ -156,10 +156,26 @@ export async function POST(request: Request) {
     const table = await db.table.findFirst({
       where: { id: tableId, restaurantId },
     })
+
     if (!table) {
       return NextResponse.json(
         { error: 'Table not found' },
         { status: 404 }
+      )
+    }
+
+    // Require open cash session before taking orders
+    const openSession = await db.cashSession.findFirst({
+      where: {
+        restaurantId,
+        status: 'open',
+      },
+    })
+
+    if (!openSession) {
+      return NextResponse.json(
+        { error: 'Debes abrir caja antes de tomar pedidos.' },
+        { status: 400 }
       )
     }
 
