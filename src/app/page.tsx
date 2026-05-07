@@ -363,6 +363,9 @@ function CamareroTab() {
   const [productSearch, setProductSearch] = useState('')
   const [activeCategory, setActiveCategory] = useState('bebida')
   const [sending, setSending] = useState(false)
+  const [editingNoteProductId, setEditingNoteProductId] = useState<string | null>(null)
+  const [editingNoteText, setEditingNoteText] = useState('')
+  const [itemNotes, setItemNotes] = useState<Record<string, string>>({})
   const [cancelTargetId, setCancelTargetId] = useState<string | null>(null)
   const [cancelling, setCancelling] = useState(false)
 
@@ -491,7 +494,7 @@ function CamareroTab() {
         items: currentOrderItems.map((item) => ({
           productId: item.productId,
           quantity: item.quantity,
-          notes: item.notes,
+          notes: itemNotes[item.productId] ?? item.notes ?? '',
         })),
       }
 
@@ -505,6 +508,7 @@ function CamareroTab() {
         const json = await res.json()
         toast.success('Pedido enviado a cocina')
         resetOrder()
+        setItemNotes({})
         setSelectedClientId('')
         setClientSearch('')
         setShowClientSearch(false)
@@ -846,42 +850,54 @@ function CamareroTab() {
           <div className="border-t bg-amber-50 flex flex-col max-h-[35vh] md:max-h-[45vh] shrink-0">
             <ScrollArea className="flex-1 overflow-y-auto p-3 pb-1">
               <div className="space-y-2">
-                {currentOrderItems.map((item) => (
-                  <div key={item.productId} className="flex items-center justify-between text-sm gap-1">
-                    <div className="flex items-center gap-1.5 flex-1 min-w-0">
-                      <span className="font-medium truncate">{item.name}</span>
-                      {item.notes && <span className="text-xs text-muted-foreground truncate">({item.notes})</span>}
+                {currentOrderItems.map((item) => {
+                  const note = itemNotes[item.productId] ?? item.notes ?? ''
+                  return (
+                  <div key={item.productId}>
+                    <div className="flex items-center justify-between text-sm gap-1">
+                      <div className="flex items-center gap-1.5 flex-1 min-w-0">
+                        <span className="font-medium truncate">{item.name}</span>
+                        <button
+                          className={`shrink-0 size-5 flex items-center justify-center rounded transition-colors ${note ? 'bg-amber-200 text-amber-800 hover:bg-amber-300' : 'bg-gray-100 text-gray-400 hover:bg-gray-200 hover:text-gray-600'}`}
+                          onClick={() => { setEditingNoteProductId(item.productId); setEditingNoteText(note) }}
+                          title={note ? `Nota: ${note}` : 'Añadir nota'}
+                        >
+                          <Pencil className="size-2.5" />
+                        </button>
+                      </div>
+                      <div className="flex items-center gap-1 shrink-0">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="size-7 p-0"
+                          onClick={() => updateOrderItemQuantity(item.productId, item.quantity - 1)}
+                        >
+                          <Minus className="size-3" />
+                        </Button>
+                        <span className="w-6 text-center font-bold text-xs">{item.quantity}</span>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="size-7 p-0"
+                          onClick={() => updateOrderItemQuantity(item.productId, item.quantity + 1)}
+                        >
+                          <Plus className="size-3" />
+                        </Button>
+                        <span className="w-14 text-right font-semibold text-xs">{formatEUR(item.price * item.quantity)}</span>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="size-7 p-0 text-red-500 hover:text-red-700"
+                          onClick={() => removeOrderItem(item.productId)}
+                        >
+                          <X className="size-3" />
+                        </Button>
+                      </div>
                     </div>
-                    <div className="flex items-center gap-1 shrink-0">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="size-7 p-0"
-                        onClick={() => updateOrderItemQuantity(item.productId, item.quantity - 1)}
-                      >
-                        <Minus className="size-3" />
-                      </Button>
-                      <span className="w-6 text-center font-bold text-xs">{item.quantity}</span>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="size-7 p-0"
-                        onClick={() => updateOrderItemQuantity(item.productId, item.quantity + 1)}
-                      >
-                        <Plus className="size-3" />
-                      </Button>
-                      <span className="w-14 text-right font-semibold text-xs">{formatEUR(item.price * item.quantity)}</span>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="size-7 p-0 text-red-500 hover:text-red-700"
-                        onClick={() => removeOrderItem(item.productId)}
-                      >
-                        <X className="size-3" />
-                      </Button>
-                    </div>
+                    {note && <p className="text-xs text-amber-700 mt-0.5 pl-0.5 truncate">📝 {note}</p>}
                   </div>
-                ))}
+                  )
+                })}
               </div>
             </ScrollArea>
             <div className="flex items-center justify-between p-2 sm:p-3 pt-2 border-t shrink-0">
@@ -890,7 +906,7 @@ function CamareroTab() {
                 <span className="text-lg sm:text-xl font-bold text-amber-800">{formatEUR(currentTotal)}</span>
               </div>
               <div className="flex gap-2">
-                <Button variant="outline" size="sm" className="h-10 sm:h-12 sm:flex-1" onClick={() => { clearOrderItems() }}>
+                <Button variant="outline" size="sm" className="h-10 sm:h-12 sm:flex-1" onClick={() => { clearOrderItems(); setItemNotes({}) }}>
                   Limpiar
                 </Button>
                 <Button
@@ -905,6 +921,34 @@ function CamareroTab() {
             </div>
           </div>
         )}
+        {/* Note editing dialog */}
+        <Dialog open={editingNoteProductId !== null} onOpenChange={(open) => { if (!open) setEditingNoteProductId(null) }}>
+          <DialogContent className="sm:max-w-sm">
+            <DialogHeader>
+              <DialogTitle className="text-base">
+                <Pencil className="size-4 inline mr-1.5 text-amber-600" />
+                Nota: {currentOrderItems.find((i) => i.productId === editingNoteProductId)?.name ?? 'Item'}
+              </DialogTitle>
+              <DialogDescription>Añade instrucciones especiales para este item (sin cebolla, poco hecho, etc.)</DialogDescription>
+            </DialogHeader>
+            <Textarea
+              placeholder="Ej: Sin cebolla, poco hecho, sin sal..."
+              value={editingNoteText}
+              onChange={(e) => setEditingNoteText(e.target.value)}
+              className="min-h-[80px] resize-none"
+              autoFocus
+            />
+            <DialogFooter className="gap-2 sm:gap-0">
+              <Button variant="outline" onClick={() => { setEditingNoteProductId(null); setEditingNoteText('') }}>Cancelar</Button>
+              <Button className="bg-amber-600 hover:bg-amber-700 text-white" onClick={() => {
+                if (editingNoteProductId) {
+                  setItemNotes((prev) => ({ ...prev, [editingNoteProductId]: editingNoteText }))
+                }
+                setEditingNoteProductId(null)
+              }}>Guardar</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
         {/* Cancel confirmation dialog */}
         <AlertDialog open={cancelTargetId !== null} onOpenChange={(open) => { if (!open) setCancelTargetId(null) }}>
           <AlertDialogContent>
