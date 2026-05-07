@@ -30,6 +30,9 @@ const orderInclude = {
   finishedBy: {
     select: { id: true, username: true, name: true, role: true },
   },
+  cancelledBy: {
+    select: { id: true, username: true, name: true, role: true },
+  },
 }
 
 // ─── GET /api/orders ────────────────────────────────────────

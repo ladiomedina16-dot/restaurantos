@@ -56,6 +56,7 @@ model User {
 
   ordersCreated      Order[]       @relation("OrderCreator")
   ordersReady        Order[]       @relation("OrderFinisher")
+  ordersCancelled    Order[]       @relation("OrderCanceller")
   payments           Payment[]
   auditLogs          AuditLog[]
   openedCashSessions CashSession[] @relation("CashSessionOpener")
@@ -132,25 +133,28 @@ model Client {
 
 // ─── PEDIDOS ────────────────────────────────────────────────
 model Order {
-  id           String   @id @default(cuid())
-  tableId      String
-  clientId     String?
-  status       String   @default("pending")
-  subtotal     Float    @default(0)
-  discount     Float    @default(0)
-  total        Float    @default(0)
-  notes        String   @default("")
-  createdById  String?
-  finishedById String?
-  restaurantId String
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id            String   @id @default(cuid())
+  tableId       String
+  clientId      String?
+  status        String   @default("pending")
+  subtotal      Float    @default(0)
+  discount      Float    @default(0)
+  total         Float    @default(0)
+  notes         String   @default("")
+  createdById   String?
+  finishedById  String?
+  cancelledById String?
+  cancelledAt   DateTime?
+  restaurantId  String
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
   restaurant Restaurant  @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
   table       Table      @relation(fields: [tableId], references: [id], onDelete: Cascade)
   client      Client?    @relation(fields: [clientId], references: [id], onDelete: SetNull)
   createdBy   User?      @relation("OrderCreator", fields: [createdById], references: [id], onDelete: SetNull)
   finishedBy  User?      @relation("OrderFinisher", fields: [finishedById], references: [id], onDelete: SetNull)
+  cancelledBy User?      @relation("OrderCanceller", fields: [cancelledById], references: [id], onDelete: SetNull)
   items       OrderItem[]
   payments    Payment[]
 
@@ -159,6 +163,7 @@ model Order {
   @@index([tableId])
   @@index([clientId])
   @@index([createdAt])
+  @@index([cancelledAt])
 }
 
 // ─── ITEMS DE PEDIDO ────────────────────────────────────────
