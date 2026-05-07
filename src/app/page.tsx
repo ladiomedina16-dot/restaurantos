@@ -366,6 +366,9 @@ function CamareroTab() {
   const [cancelTargetId, setCancelTargetId] = useState<string | null>(null)
   const [cancelling, setCancelling] = useState(false)
 
+  // Existing orders for the selected table (shown in menu view)
+  const [tableOrders, setTableOrders] = useState<Order[]>([])
+
   // Cuenta (bill) state
   const [cuentaTable, setCuentaTable] = useState<TableItem | null>(null)
   const [cuentaOrders, setCuentaOrders] = useState<Order[]>([])
@@ -417,6 +420,17 @@ function CamareroTab() {
     }
   }, [authHeaders, handleFetchResponse])
 
+  // Fetch existing orders for the currently selected table
+  const fetchTableOrders = useCallback(async (tableId: string) => {
+    try {
+      const res = await fetch(`/api/orders?status=pending,in_progress,ready,served&tableId=${tableId}`, { headers: authHeaders(false) })
+      if (handleFetchResponse(res) && res.ok) {
+        const json = await res.json()
+        setTableOrders(json.orders)
+      }
+    } catch { /* silently fail */ }
+  }, [authHeaders, handleFetchResponse])
+
   useEffect(() => {
     const load = async () => {
       await Promise.all([fetchTables(), fetchProducts()])
@@ -432,6 +446,8 @@ function CamareroTab() {
   const handleSelectTable = (table: TableItem) => {
     setSelectedTable(table)
     setView('menu')
+    // Fetch existing orders for this table so we can show them
+    fetchTableOrders(table.id)
   }
 
   const handleAddProduct = (product: Product) => {
@@ -480,8 +496,8 @@ function CamareroTab() {
         setClientSearch('')
         setShowClientSearch(false)
         setProductSearch('')
-        setView('tables')
-        setSelectedTable(null)
+        // Stay on menu view so user can see the order, refresh table orders
+        fetchTableOrders(selectedTable.id)
         fetchTables()
       } else {
         const err = await res.json()
@@ -514,6 +530,7 @@ function CamareroTab() {
       if (handleFetchResponse(res) && res.ok) {
         toast.success('Pedido cancelado')
         if (cuentaTable) fetchCuentaOrders(cuentaTable.id)
+        if (selectedTable) fetchTableOrders(selectedTable.id)
         fetchTables()
         setCancelTargetId(null)
       } else {
@@ -599,11 +616,12 @@ function CamareroTab() {
 
   // ─── Menu View ───────────────────────────────────────────────
   if (view === 'menu' && selectedTable) {
+    const isOccupied = selectedTable.status === 'occupied'
     return (
       <div className="flex flex-col h-[calc(100vh-10rem)]">
         {/* Header */}
         <div className="flex items-center gap-3 pb-3 border-b">
-          <Button variant="outline" size="sm" className="h-12" onClick={() => { setView('tables'); setSelectedTable(null) }}>
+          <Button variant="outline" size="sm" className="h-12" onClick={() => { setView('tables'); setSelectedTable(null); setTableOrders([]) }}>
             <ArrowLeft className="size-5" />
           </Button>
           <div className="flex items-center gap-2">
@@ -616,6 +634,16 @@ function CamareroTab() {
             </div>
           </div>
           <div className="ml-auto flex items-center gap-2">
+            {isOccupied && (
+              <Button
+                size="sm"
+                className="h-10 bg-green-600 hover:bg-green-700 text-white"
+                onClick={() => handlePedirCuenta(selectedTable)}
+              >
+                <Euro className="size-4 mr-1" />
+                Cobrar
+              </Button>
+            )}
             <Button
               variant="outline"
               size="sm"
@@ -627,6 +655,71 @@ function CamareroTab() {
             </Button>
           </div>
         </div>
+
+        {/* Existing orders for this table */}
+        {tableOrders.length > 0 && (
+          <div className="border-b bg-orange-50/50 p-3">
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-sm font-semibold text-amber-800">
+                <Receipt className="size-4 inline mr-1" />
+                Pedidos activos ({tableOrders.length})
+              </p>
+              <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => fetchTableOrders(selectedTable.id)}>
+                <ShoppingCart className="size-3 mr-1" />
+                Refrescar
+              </Button>
+            </div>
+            <div className="space-y-2">
+              {tableOrders.map((order) => (
+                <div key={order.id} className="bg-white rounded-lg p-2 border text-sm">
+                  <div className="flex items-center justify-between mb-1">
+                    <Badge
+                      variant="outline"
+                      className={
+                        order.status === 'ready'
+                          ? 'bg-green-100 text-green-800 border-green-200 text-xs'
+                          : order.status === 'pending'
+                          ? 'bg-amber-100 text-amber-800 border-amber-200 text-xs'
+                          : 'bg-orange-100 text-orange-800 border-orange-200 text-xs'
+                      }
+                    >
+                      {order.status === 'ready' ? '✅ Listo' : order.status === 'pending' ? '⏳ Pendiente' : '🔥 En curso'}
+                    </Badge>
+                    <div className="flex items-center gap-1">
+                      <span className="text-xs text-muted-foreground">{formatTime(order.createdAt)}</span>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 w-6 p-0 text-red-500 hover:text-red-700 hover:bg-red-50"
+                        onClick={() => setCancelTargetId(order.id)}
+                        title="Cancelar pedido"
+                      >
+                        <XCircle className="size-3.5" />
+                      </Button>
+                    </div>
+                  </div>
+                  <div className="space-y-0.5">
+                    {order.items.map((item) => (
+                      <div key={item.id} className="flex justify-between text-xs">
+                        <span>
+                          <span className="font-medium">{item.quantity}x</span>{' '}
+                          {item.product?.name ?? 'Producto'}
+                          {item.destination === 'bar' && <span className="text-amber-500 ml-1">🍹</span>}
+                          {item.destination === 'kitchen' && <span className="text-orange-500 ml-1">🍳</span>}
+                        </span>
+                        <span className="text-muted-foreground">{formatEUR(item.subtotal)}</span>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="flex justify-between mt-1 pt-1 border-t text-xs font-semibold">
+                    <span>Total pedido</span>
+                    <span>{formatEUR(order.items.reduce((s, i) => s + i.subtotal, 0))}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Client Search */}
         {showClientSearch && (
@@ -799,6 +892,23 @@ function CamareroTab() {
             </div>
           </div>
         )}
+        {/* Cancel confirmation dialog */}
+        <AlertDialog open={cancelTargetId !== null} onOpenChange={(open) => { if (!open) setCancelTargetId(null) }}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>¿Cancelar pedido?</AlertDialogTitle>
+              <AlertDialogDescription>
+                Se cancelará el pedido. Los productos volverán al stock y la mesa quedará libre si no tiene otros pedidos activos.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel onClick={() => setCancelTargetId(null)}>No, mantener</AlertDialogCancel>
+              <AlertDialogAction className="bg-red-600 hover:bg-red-700 text-white" onClick={handleCancelOrder} disabled={cancelling}>
+                {cancelling ? 'Cancelando...' : 'Sí, cancelar pedido'}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
     )
   }
@@ -1046,9 +1156,11 @@ function CocinaTab() {
           const kitchenItems = order.items.filter((i) => i.destination === 'kitchen')
           return kitchenItems.some((i) => i.status !== 'ready')
         })
+        console.log('[Cocina] Fetched:', json.orders?.length, 'orders → filtered:', filtered.length)
         setOrders(filtered)
       } else if (res.status !== 401) {
-        console.error('[Cocina] Fetch failed:', res.status, await res.text().catch(() => ''))
+        const errText = await res.text().catch(() => '')
+        console.error('[Cocina] Fetch failed:', res.status, errText)
       }
     } catch (err) {
       console.error('[Cocina] Fetch error:', err)
@@ -1272,9 +1384,11 @@ function BarraTab() {
           const barItems = order.items.filter((i) => i.destination === 'bar')
           return barItems.some((i) => i.status !== 'ready')
         })
+        console.log('[Barra] Fetched:', json.orders?.length, 'orders → filtered:', filtered.length)
         setOrders(filtered)
       } else if (res.status !== 401) {
-        console.error('[Barra] Fetch failed:', res.status, await res.text().catch(() => ''))
+        const errText = await res.text().catch(() => '')
+        console.error('[Barra] Fetch failed:', res.status, errText)
       }
     } catch (err) {
       console.error('[Barra] Fetch error:', err)
