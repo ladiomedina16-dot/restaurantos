@@ -107,10 +107,96 @@ export async function POST(request: Request) {
     const validation = validateInput(loginSchema, { username: body.username, password: body.password })
     if (!validation.success) return validation.error
 
-    const { username, password } = validation.data
+    const { username, password, restaurantSlug } = validation.data
 
-    // findFirst instead of findUnique: works with both @unique and @@unique([username, restaurantId])
-    const user = await db.user.findFirst({ where: { username } })
+    // ─── Find user by username ──────────────────────────
+    // Multi-restaurant: same username can exist in different restaurants.
+    // Strategy:
+    //   1. If restaurantSlug provided → resolve to restaurantId, find by username+restaurantId
+    //   2. If not provided → find all users with that username
+    //      - If 1 result → proceed (backward compatible)
+    //      - If >1 results → return error asking for restaurantSlug
+    //      - If 0 results → invalid credentials
+
+    let user: {
+      id: string
+      username: string
+      name: string
+      role: string
+      active: boolean
+      passwordHash: string
+      zone: string | null
+      restaurantId: string | null
+      mustChangePassword: boolean
+    } | null = null
+
+    if (restaurantSlug) {
+      // Resolve slug to restaurant, then find user in that restaurant
+      const restaurant = await db.restaurant.findUnique({
+        where: { slug: restaurantSlug },
+        select: { id: true },
+      })
+      if (!restaurant) {
+        return NextResponse.json(
+          { error: 'Restaurante no encontrado.' },
+          { status: 401 }
+        )
+      }
+      user = await db.user.findFirst({
+        where: { username, restaurantId: restaurant.id },
+      })
+      // Also check super_admin (restaurantId=null) — they can login from any restaurant context
+      if (!user) {
+        user = await db.user.findFirst({
+          where: { username, restaurantId: null },
+        })
+      }
+    } else {
+      // No slug provided — find all users with this username
+      const candidates = await db.user.findMany({
+        where: { username },
+      })
+
+      if (candidates.length === 0) {
+        return NextResponse.json(
+          { error: 'Credenciales inválidas' },
+          { status: 401 }
+        )
+      }
+
+      if (candidates.length === 1) {
+        // Exactly one match — backward compatible
+        user = candidates[0]
+      } else {
+        // Multiple matches — username exists in multiple restaurants
+        // Try password against all candidates; if exactly one matches, use that
+        const passwordMatches: typeof candidates = []
+        for (const candidate of candidates) {
+          const valid = await verifyPassword(password, candidate.passwordHash)
+          if (valid) passwordMatches.push(candidate)
+        }
+
+        if (passwordMatches.length === 1) {
+          // Only one candidate has this password — unambiguous
+          user = passwordMatches[0]
+        } else if (passwordMatches.length > 1) {
+          // Multiple candidates with same password — need restaurantSlug to disambiguate
+          const restaurants = await db.restaurant.findMany({
+            where: { id: { in: passwordMatches.map(u => u.restaurantId).filter(Boolean) as string[] } },
+            select: { slug: true, name: true },
+          })
+          return NextResponse.json(
+            {
+              error: 'Este usuario existe en múltiples restaurantes. Especifique el restaurante.',
+              requiresRestaurant: true,
+              restaurants: restaurants.map(r => ({ slug: r.slug, name: r.name })),
+            },
+            { status: 401 }
+          )
+        }
+        // If no password matches, user stays null → falls through to "invalid credentials" below
+      }
+    }
 
     if (!user) {
       return NextResponse.json(

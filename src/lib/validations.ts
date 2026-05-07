@@ -10,6 +10,7 @@ import { z, ZodError } from 'zod'
 export const loginSchema = z.object({
   username: z.string().min(1, 'Username es obligatorio').max(50),
   password: z.string().min(1, 'Password es obligatorio').max(200),
+  restaurantSlug: z.string().min(1).max(100).optional(),
 })
 
 export const refreshTokenSchema = z.object({
