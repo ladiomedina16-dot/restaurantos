@@ -3557,22 +3557,22 @@ function SuperAdminPanel() {
             ))}
           </TabsList>
           <TabsContent value="dashboard" className="mt-4">
-            <DashboardTab overrideRestaurantId={viewRestaurantId} />
+            <DashboardTab key={`dashboard-${viewRestaurantId}`} overrideRestaurantId={viewRestaurantId} />
           </TabsContent>
           <TabsContent value="users" className="mt-4">
-            <UsersTab overrideRestaurantId={viewRestaurantId} />
+            <UsersTab key={`users-${viewRestaurantId}`} overrideRestaurantId={viewRestaurantId} />
           </TabsContent>
           <TabsContent value="tables" className="mt-4">
-            <TablesTab overrideRestaurantId={viewRestaurantId} />
+            <TablesTab key={`tables-${viewRestaurantId}`} overrideRestaurantId={viewRestaurantId} />
           </TabsContent>
           <TabsContent value="products" className="mt-4">
-            <ProductsTab overrideRestaurantId={viewRestaurantId} />
+            <ProductsTab key={`products-${viewRestaurantId}`} overrideRestaurantId={viewRestaurantId} />
           </TabsContent>
           <TabsContent value="orders" className="mt-4">
-            <OrdersTab overrideRestaurantId={viewRestaurantId} />
+            <OrdersTab key={`orders-${viewRestaurantId}`} overrideRestaurantId={viewRestaurantId} />
           </TabsContent>
           <TabsContent value="clients" className="mt-4">
-            <ClientsTab overrideRestaurantId={viewRestaurantId} />
+            <ClientsTab key={`clients-${viewRestaurantId}`} overrideRestaurantId={viewRestaurantId} />
           </TabsContent>
         </Tabs>
       </div>
@@ -5550,7 +5550,7 @@ function ClientsTab({ overrideRestaurantId }: { overrideRestaurantId?: string } 
 // ─── MAIN PAGE ──────────────────────────────────────────────────────────────
 
 export default function RestaurantPage() {
-  const { activeTab, setActiveTab, realtimeConnected, setRealtimeConnected } = useRestaurantStore()
+  const { activeTab, setActiveTab, realtimeConnected, setRealtimeConnected, clearAllState } = useRestaurantStore()
 
   // ─── Auth State ────────────────────────────────────────────────
   const [authToken, setAuthToken] = useState<string | null>(null)
@@ -5559,6 +5559,9 @@ export default function RestaurantPage() {
   const [loginPassword, setLoginPassword] = useState('')
   const [loginError, setLoginError] = useState('')
   const [loginLoading, setLoginLoading] = useState(false)
+  const [loginRequiresRestaurant, setLoginRequiresRestaurant] = useState(false)
+  const [loginRestaurantOptions, setLoginRestaurantOptions] = useState<{ slug: string; name: string }[]>([])
+  const [loginSelectedSlug, setLoginSelectedSlug] = useState('')
 
   // ─── Must Change Password State ──────────────────────────────
   const [showChangePasswordDialog, setShowChangePasswordDialog] = useState(false)
@@ -5570,6 +5573,9 @@ export default function RestaurantPage() {
 
   // ─── SaaS Subscription State ────────────────────────────────
   const [subscriptionSuspended, setSubscriptionSuspended] = useState(false)
+
+  // ─── Restaurant Name (for header display) ────────────────────
+  const [currentRestaurantName, setCurrentRestaurantName] = useState<string | null>(null)
 
   // Load auth from localStorage on mount
   useEffect(() => {
@@ -5646,18 +5652,25 @@ export default function RestaurantPage() {
   const logout = useCallback(() => {
     setAuthToken(null)
     setCurrentUser(null)
+    setCurrentRestaurantName(null)
     localStorage.removeItem('restaurantos_auth')
-  }, [])
+    clearAllState()
+  }, [clearAllState])
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
     setLoginError('')
     setLoginLoading(true)
     try {
+      const loginPayload: Record<string, string> = { username: loginUsername, password: loginPassword }
+      // If user selected a restaurant slug (for multi-restaurant username disambiguation), send it
+      if (loginRequiresRestaurant && loginSelectedSlug) {
+        loginPayload.restaurantSlug = loginSelectedSlug
+      }
       const res = await fetch('/api/auth', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: loginUsername, password: loginPassword }),
+        body: JSON.stringify(loginPayload),
       })
       const data = await res.json()
       if (res.ok) {
@@ -5667,12 +5680,22 @@ export default function RestaurantPage() {
         localStorage.setItem('restaurantos_auth', JSON.stringify({ token: data.token, refreshToken: data.refreshToken, user: userData }))
         setLoginUsername('')
         setLoginPassword('')
+        setLoginRequiresRestaurant(false)
+        setLoginRestaurantOptions([])
+        setLoginSelectedSlug('')
         // Check must change password
         if (userData.mustChangePassword) {
           setShowChangePasswordDialog(true)
         }
       } else {
-        setLoginError(data.error || 'Error al iniciar sesión')
+        // Handle multi-restaurant username disambiguation
+        if (data.requiresRestaurant && data.restaurants) {
+          setLoginRequiresRestaurant(true)
+          setLoginRestaurantOptions(data.restaurants)
+          setLoginError(data.error || 'Seleccione un restaurante para continuar')
+        } else {
+          setLoginError(data.error || 'Error al iniciar sesión')
+        }
       }
     } catch {
       setLoginError('Error de red')
@@ -5687,15 +5710,20 @@ export default function RestaurantPage() {
     setRealtimeConnected(true)
   }, [authToken, setRealtimeConnected])
 
-  // Fetch restaurant info to check subscription status
+  // Fetch restaurant info to check subscription status AND get restaurant name
   useEffect(() => {
-    if (!authToken || !currentUser?.restaurantId) return
+    if (!authToken || !currentUser?.restaurantId) {
+      setCurrentRestaurantName(null)
+      return
+    }
     const fetchRestaurant = async () => {
       try {
         const res = await fetch(`/api/restaurants/${currentUser.restaurantId}`, { headers: authHeaders(false) })
         if (res.ok) {
           const data = await res.json()
-          setSubscriptionSuspended(data.subscriptionStatus === 'suspended' || data.restaurant?.subscriptionStatus === 'suspended')
+          const restaurant = data.restaurant ?? data
+          setSubscriptionSuspended(restaurant.subscriptionStatus === 'suspended')
+          setCurrentRestaurantName(restaurant.name ?? null)
         }
       } catch { /* silently fail */ }
     }
@@ -5773,7 +5801,7 @@ export default function RestaurantPage() {
                   type="text"
                   placeholder="usuario"
                   value={loginUsername}
-                  onChange={(e) => setLoginUsername(e.target.value)}
+                  onChange={(e) => { setLoginUsername(e.target.value); setLoginRequiresRestaurant(false); setLoginRestaurantOptions([]); setLoginSelectedSlug('') }}
                   className="h-12"
                   required
                 />
@@ -5790,6 +5818,23 @@ export default function RestaurantPage() {
                   required
                 />
               </div>
+              {loginRequiresRestaurant && loginRestaurantOptions.length > 0 && (
+                <div className="space-y-2">
+                  <Label htmlFor="restaurant">Restaurante</Label>
+                  <select
+                    id="restaurant"
+                    value={loginSelectedSlug}
+                    onChange={(e) => setLoginSelectedSlug(e.target.value)}
+                    className="flex h-12 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                    required
+                  >
+                    <option value="">— Seleccione restaurante —</option>
+                    {loginRestaurantOptions.map((r) => (
+                      <option key={r.slug} value={r.slug}>{r.name}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
               {loginError && (
                 <p className="text-sm text-red-600 text-center">{loginError}</p>
               )}
@@ -5911,6 +5956,12 @@ export default function RestaurantPage() {
               ) : (
                 <Badge variant="outline" className="bg-red-50 text-red-700 border-red-200 text-xs">
                   <WifiOff className="size-3 mr-1" /> Offline
+                </Badge>
+              )}
+              {currentRestaurantName && currentUser?.role !== 'super_admin' && (
+                <Badge variant="outline" className="bg-emerald-50 text-emerald-800 border-emerald-200 text-xs">
+                  <Building2 className="size-3 mr-1" />
+                  {currentRestaurantName}
                 </Badge>
               )}
               {currentUser && (

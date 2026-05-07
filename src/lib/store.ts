@@ -50,6 +50,7 @@ interface RestaurantStore {
   setSelectedClientId: (id: string) => void
   setOrderNotes: (notes: string) => void
   resetOrder: () => void
+  clearAllState: () => void
 }
 
 export const useRestaurantStore = create<RestaurantStore>((set) => ({
@@ -129,4 +130,16 @@ export const useRestaurantStore = create<RestaurantStore>((set) => ({
   setSelectedClientId: (id) => set({ selectedClientId: id }),
   setOrderNotes: (notes) => set({ orderNotes: notes }),
   resetOrder: () => set({ currentOrderItems: [], selectedTableId: '', selectedClientId: '', orderNotes: '' }),
+
+  // Clear ALL state on logout or restaurant switch
+  clearAllState: () => set({
+    activeTab: 'camarero',
+    selectedRestaurantId: null,
+    currentOrderItems: [],
+    selectedTableId: '',
+    selectedClientId: '',
+    orderNotes: '',
+    notifications: [],
+    realtimeConnected: false,
+  }),
 }))
