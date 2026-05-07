@@ -737,43 +737,38 @@ function CamareroTab() {
 
         {/* Order summary bar */}
         {currentOrderItems.length > 0 && (
-          <div className="border-t bg-amber-50 flex flex-col max-h-[55vh] md:max-h-[45vh] shrink-0">
+          <div className="border-t bg-amber-50 flex flex-col max-h-[35vh] md:max-h-[45vh] shrink-0">
             <ScrollArea className="flex-1 overflow-y-auto p-3 pb-1">
               <div className="space-y-2">
                 {currentOrderItems.map((item) => (
-                  <div key={item.productId} className="flex items-start justify-between text-sm">
-                    <div className="flex flex-col gap-1 flex-1 min-w-0">
+                  <div key={item.productId} className="flex items-center justify-between text-sm gap-1">
+                    <div className="flex items-center gap-1.5 flex-1 min-w-0">
                       <span className="font-medium truncate">{item.name}</span>
-                      <Input
-                        placeholder="Nota..."
-                        value={item.notes}
-                        onChange={(e) => updateOrderItemNotes(item.productId, e.target.value)}
-                        className="h-7 text-xs border-amber-200 bg-white"
-                      />
+                      {item.notes && <span className="text-xs text-muted-foreground truncate">({item.notes})</span>}
                     </div>
-                    <div className="flex items-center gap-1 shrink-0 ml-2">
+                    <div className="flex items-center gap-1 shrink-0">
                       <Button
                         variant="outline"
                         size="sm"
-                        className="size-8 p-0"
+                        className="size-7 p-0"
                         onClick={() => updateOrderItemQuantity(item.productId, item.quantity - 1)}
                       >
                         <Minus className="size-3" />
                       </Button>
-                      <span className="w-8 text-center font-bold">{item.quantity}</span>
+                      <span className="w-6 text-center font-bold text-xs">{item.quantity}</span>
                       <Button
                         variant="outline"
                         size="sm"
-                        className="size-8 p-0"
+                        className="size-7 p-0"
                         onClick={() => updateOrderItemQuantity(item.productId, item.quantity + 1)}
                       >
                         <Plus className="size-3" />
                       </Button>
-                      <span className="w-16 text-right font-semibold">{formatEUR(item.price * item.quantity)}</span>
+                      <span className="w-14 text-right font-semibold text-xs">{formatEUR(item.price * item.quantity)}</span>
                       <Button
                         variant="ghost"
                         size="sm"
-                        className="size-8 p-0 text-red-500 hover:text-red-700"
+                        className="size-7 p-0 text-red-500 hover:text-red-700"
                         onClick={() => removeOrderItem(item.productId)}
                       >
                         <X className="size-3" />
@@ -783,22 +778,22 @@ function CamareroTab() {
                 ))}
               </div>
             </ScrollArea>
-            <div className="flex items-center justify-between p-3 pt-2 border-t shrink-0">
-              <div>
+            <div className="flex items-center justify-between p-2 sm:p-3 pt-2 border-t shrink-0">
+              <div className="flex items-center gap-2">
                 <span className="text-sm text-muted-foreground">{currentOrderItems.length} items</span>
-                <span className="ml-3 text-xl font-bold text-amber-800">{formatEUR(currentTotal)}</span>
+                <span className="text-lg sm:text-xl font-bold text-amber-800">{formatEUR(currentTotal)}</span>
               </div>
-              <div className="flex flex-col sm:flex-row gap-2">
-                <Button variant="outline" className="h-12 sm:flex-1" onClick={() => { clearOrderItems() }}>
+              <div className="flex gap-2">
+                <Button variant="outline" size="sm" className="h-10 sm:h-12 sm:flex-1" onClick={() => { clearOrderItems() }}>
                   Limpiar
                 </Button>
                 <Button
-                  className="h-14 sm:h-12 bg-amber-600 hover:bg-amber-700 text-white text-base font-bold px-6 sm:flex-1"
+                  className="h-12 sm:h-12 bg-amber-600 hover:bg-amber-700 text-white text-sm sm:text-base font-bold px-4 sm:px-6 sm:flex-1"
                   onClick={handleEnviarCocina}
                   disabled={sending}
                 >
-                  <Flame className="size-5 mr-2" />
-                  {sending ? 'Enviando...' : 'Enviar a Cocina'}
+                  <Flame className="size-4 sm:size-5 mr-1 sm:mr-2" />
+                  {sending ? 'Enviando...' : 'Enviar'}
                 </Button>
               </div>
             </div>
@@ -1154,13 +1149,13 @@ function CocinaTab() {
   }
 
   return (
-    <div className="bg-gray-900 rounded-xl p-4 min-h-[calc(100vh-10rem)]">
+    <div className="bg-gray-900 rounded-xl p-3 sm:p-4 min-h-[calc(100vh-10rem)]">
       {/* Header */}
-      <div className="flex items-center justify-between mb-4">
-        <div className="flex items-center gap-3">
-          <ChefHat className="size-8 text-amber-400" />
-          <h2 className="text-2xl font-bold text-white">Cocina</h2>
-          <Badge className="bg-amber-600 text-white text-sm">{orders.length} pedidos</Badge>
+      <div className="flex items-center justify-between mb-3 sm:mb-4">
+        <div className="flex items-center gap-2 sm:gap-3">
+          <ChefHat className="size-6 sm:size-8 text-amber-400" />
+          <h2 className="text-xl sm:text-2xl font-bold text-white">Cocina</h2>
+          <Badge className="bg-amber-600 text-white text-xs sm:text-sm">{orders.length} pedidos</Badge>
         </div>
         <Button
           variant="outline"
@@ -1180,24 +1175,24 @@ function CocinaTab() {
           <p className="text-sm mt-1">No hay comandas pendientes</p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 sm:gap-4">
           {sortedOrders.map((order) => (
             <div
               key={order.id}
-              className={`bg-gray-800 rounded-xl p-4 border-l-4 transition-all ${
+              className={`bg-gray-800 rounded-xl p-3 sm:p-4 border-l-4 transition-all ${
                 order.status === 'pending' ? 'border-l-amber-500' : 'border-l-orange-500'
               }`}
             >
               {/* Card header: Mesa + Time — NO PRICES */}
-              <div className="flex items-start justify-between mb-3">
+              <div className="flex items-start justify-between mb-2 sm:mb-3">
                 <div>
-                  <p className="text-3xl font-bold text-white">Mesa {order.table?.number ?? '?'}</p>
-                  <p className="text-sm text-gray-400">{zoneConfig[order.table?.zone]?.label ?? order.table?.zone}</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-white">Mesa {order.table?.number ?? '?'}</p>
+                  <p className="text-xs sm:text-sm text-gray-400">{zoneConfig[order.table?.zone]?.label ?? order.table?.zone}</p>
                 </div>
                 <div className="text-right">
-                  <p className="text-sm text-gray-400">{formatTime(order.createdAt)}</p>
-                  <p className={`text-lg font-bold ${elapsedColor(order.createdAt)}`}>
-                    <Timer className="size-4 inline mr-1" />
+                  <p className="text-xs sm:text-sm text-gray-400">{formatTime(order.createdAt)}</p>
+                  <p className={`text-base sm:text-lg font-bold ${elapsedColor(order.createdAt)}`}>
+                    <Timer className="size-3 sm:size-4 inline mr-1" />
                     {timeAgo(order.createdAt)}
                   </p>
                 </div>
@@ -1205,7 +1200,7 @@ function CocinaTab() {
 
               {/* Simple status: pending or preparing — NO payment/served states */}
               <Badge
-                className={`mb-3 ${
+                className={`mb-2 sm:mb-3 ${
                   order.status === 'pending'
                     ? 'bg-amber-600/20 text-amber-400 border-amber-600/30'
                     : 'bg-orange-600/20 text-orange-400 border-orange-600/30'
@@ -1215,32 +1210,32 @@ function CocinaTab() {
                 {order.status === 'pending' ? '⏳ Pendiente' : '🔥 Preparando'}
               </Badge>
 
-              {/* Items list — per-item LISTO buttons, NO PRICES shown */}
-              <div className="space-y-2 mb-4">
-                {order.items.map((item) => {
+              {/* Items list — per-item LISTO buttons, NO PRICES shown. Filter by destination as safety measure */}
+              <div className="space-y-1.5 sm:space-y-2">
+                {order.items.filter((item) => item.destination === 'kitchen').map((item) => {
                   const isReady = item.status === 'ready'
                   return (
-                    <div key={item.id} className="flex items-center gap-2">
-                      <span className={`flex size-6 items-center justify-center rounded text-xs font-bold shrink-0 ${isReady ? 'bg-green-600/30 text-green-300' : 'bg-amber-600/30 text-amber-300'}`}>
-                        {isReady ? <CheckCircle className="size-4" /> : item.quantity}
+                    <div key={item.id} className="flex items-center gap-1.5 sm:gap-2">
+                      <span className={`flex size-5 sm:size-6 items-center justify-center rounded text-xs font-bold shrink-0 ${isReady ? 'bg-green-600/30 text-green-300' : 'bg-amber-600/30 text-amber-300'}`}>
+                        {isReady ? <CheckCircle className="size-3 sm:size-4" /> : item.quantity}
                       </span>
-                      <span className={`text-sm leading-tight flex-1 ${isReady ? 'line-through text-gray-500' : 'text-white'}`}>
+                      <span className={`text-xs sm:text-sm leading-tight flex-1 ${isReady ? 'line-through text-gray-500' : 'text-white'}`}>
                         {item.product?.name ?? 'Producto'}
                       </span>
                       {item.notes && (
-                        <span className={`text-xs ml-1 ${isReady ? 'text-gray-600' : 'text-amber-400'}`}>({item.notes})</span>
+                        <span className={`text-xs ml-1 hidden sm:inline ${isReady ? 'text-gray-600' : 'text-amber-400'}`}>({item.notes})</span>
                       )}
                       {item.modifiers && item.modifiers !== '[]' && item.modifiers !== '' && (
-                        <span className={`text-xs ml-1 ${isReady ? 'text-gray-600' : 'text-red-400'}`}>
+                        <span className={`text-xs ml-1 hidden sm:inline ${isReady ? 'text-gray-600' : 'text-red-400'}`}>
                           ({JSON.parse(item.modifiers).join(', ')})
                         </span>
                       )}
                       {isReady ? (
-                        <CheckCircle className="size-5 text-green-400 shrink-0" />
+                        <CheckCircle className="size-4 sm:size-5 text-green-400 shrink-0" />
                       ) : (
                         <Button
                           size="sm"
-                          className="h-8 px-3 text-xs font-bold bg-green-600 hover:bg-green-700 text-white shrink-0"
+                          className="h-7 sm:h-8 px-2 sm:px-3 text-xs font-bold bg-green-600 hover:bg-green-700 text-white shrink-0"
                           onClick={() => handleItemReady(order.id, item.id)}
                           disabled={markingItem === item.id}
                         >
@@ -1373,14 +1368,14 @@ function BarraTab() {
   }
 
   return (
-    <div className="bg-amber-50 rounded-xl p-4 min-h-[calc(100vh-10rem)]">
-      <div className="flex items-center justify-between mb-4">
-        <div className="flex items-center gap-3">
-          <Wine className="size-8 text-amber-600" />
-          <h2 className="text-2xl font-bold text-amber-900">Barra</h2>
-          <Badge className="bg-amber-600 text-white text-sm">{orders.length} pedidos</Badge>
+    <div className="bg-amber-50 rounded-xl p-3 sm:p-4 min-h-[calc(100vh-10rem)]">
+      <div className="flex items-center justify-between mb-3 sm:mb-4">
+        <div className="flex items-center gap-2 sm:gap-3">
+          <Wine className="size-6 sm:size-8 text-amber-600" />
+          <h2 className="text-xl sm:text-2xl font-bold text-amber-900">Barra</h2>
+          <Badge className="bg-amber-600 text-white text-xs sm:text-sm">{orders.length} pedidos</Badge>
         </div>
-        <Button variant="outline" size="sm" className="h-10" onClick={fetchOrders}>
+        <Button variant="outline" size="sm" className="h-9 sm:h-10" onClick={fetchOrders}>
           <ShoppingCart className="size-4 mr-1" />
           Actualizar
         </Button>
@@ -1393,30 +1388,30 @@ function BarraTab() {
           <p className="text-sm mt-1">No hay bebidas pendientes</p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 sm:gap-4">
           {sortedOrders.map((order) => (
             <div
               key={order.id}
-              className={`bg-white rounded-xl p-4 border-l-4 transition-all shadow-sm ${
+              className={`bg-white rounded-xl p-3 sm:p-4 border-l-4 transition-all shadow-sm ${
                 order.status === 'pending' ? 'border-l-amber-500' : 'border-l-orange-500'
               }`}
             >
-              <div className="flex items-start justify-between mb-3">
+              <div className="flex items-start justify-between mb-2 sm:mb-3">
                 <div>
-                  <p className="text-3xl font-bold text-amber-900">Mesa {order.table?.number ?? '?'}</p>
-                  <p className="text-sm text-amber-600">{zoneConfig[order.table?.zone]?.label ?? order.table?.zone}</p>
+                  <p className="text-2xl sm:text-3xl font-bold text-amber-900">Mesa {order.table?.number ?? '?'}</p>
+                  <p className="text-xs sm:text-sm text-amber-600">{zoneConfig[order.table?.zone]?.label ?? order.table?.zone}</p>
                 </div>
                 <div className="text-right">
-                  <p className="text-sm text-amber-600">{formatTime(order.createdAt)}</p>
-                  <p className={`text-lg font-bold ${elapsedColor(order.createdAt)}`}>
-                    <Timer className="size-4 inline mr-1" />
+                  <p className="text-xs sm:text-sm text-amber-600">{formatTime(order.createdAt)}</p>
+                  <p className={`text-base sm:text-lg font-bold ${elapsedColor(order.createdAt)}`}>
+                    <Timer className="size-3 sm:size-4 inline mr-1" />
                     {timeAgo(order.createdAt)}
                   </p>
                 </div>
               </div>
 
               <Badge
-                className={`mb-3 ${
+                className={`mb-2 sm:mb-3 ${
                   order.status === 'pending'
                     ? 'bg-amber-100 text-amber-800 border-amber-200'
                     : 'bg-orange-100 text-orange-800 border-orange-200'
@@ -1426,26 +1421,27 @@ function BarraTab() {
                 {order.status === 'pending' ? '⏳ Pendiente' : '🔥 Preparando'}
               </Badge>
 
-              <div className="space-y-2 mb-4">
-                {order.items.map((item) => {
+              {/* Items list — filter by destination as safety measure */}
+              <div className="space-y-1.5 sm:space-y-2">
+                {order.items.filter((item) => item.destination === 'bar').map((item) => {
                   const isReady = item.status === 'ready'
                   return (
-                    <div key={item.id} className="flex items-center gap-2">
-                      <span className={`flex size-6 items-center justify-center rounded text-xs font-bold shrink-0 ${isReady ? 'bg-green-200 text-green-800' : 'bg-amber-200 text-amber-800'}`}>
-                        {isReady ? <CheckCircle className="size-4" /> : item.quantity}
+                    <div key={item.id} className="flex items-center gap-1.5 sm:gap-2">
+                      <span className={`flex size-5 sm:size-6 items-center justify-center rounded text-xs font-bold shrink-0 ${isReady ? 'bg-green-200 text-green-800' : 'bg-amber-200 text-amber-800'}`}>
+                        {isReady ? <CheckCircle className="size-3 sm:size-4" /> : item.quantity}
                       </span>
-                      <span className={`text-sm leading-tight flex-1 ${isReady ? 'line-through text-amber-400' : 'text-amber-900'}`}>
+                      <span className={`text-xs sm:text-sm leading-tight flex-1 ${isReady ? 'line-through text-amber-400' : 'text-amber-900'}`}>
                         {item.product?.name ?? 'Bebida'}
                       </span>
                       {item.notes && (
-                        <span className={`text-xs ml-1 ${isReady ? 'text-amber-300' : 'text-amber-500'}`}>({item.notes})</span>
+                        <span className={`text-xs ml-1 hidden sm:inline ${isReady ? 'text-amber-300' : 'text-amber-500'}`}>({item.notes})</span>
                       )}
                       {isReady ? (
-                        <CheckCircle className="size-5 text-green-600 shrink-0" />
+                        <CheckCircle className="size-4 sm:size-5 text-green-600 shrink-0" />
                       ) : (
                         <Button
                           size="sm"
-                          className="h-8 px-3 text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white shrink-0"
+                          className="h-7 sm:h-8 px-2 sm:px-3 text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white shrink-0"
                           onClick={() => handleItemReady(order.id, item.id)}
                           disabled={markingItem === item.id}
                         >
@@ -5598,6 +5594,11 @@ export default function RestaurantPage() {
             if (exp && exp * 1000 > Date.now()) {
               setAuthToken(parsed.token)
               setCurrentUser(parsed.user)
+              // Auto-select tab based on role on restore
+              const role = parsed.user?.role
+              if (role === 'cocina') setActiveTab('cocina')
+              else if (role === 'barra') setActiveTab('barra')
+              else if (role === 'caja') setActiveTab('caja')
             } else if (parsed.refreshToken) {
               // Try to refresh the token
               fetch('/api/auth', {
@@ -5612,6 +5613,10 @@ export default function RestaurantPage() {
                     setAuthToken(data.token)
                     setCurrentUser(userData)
                     localStorage.setItem('restaurantos_auth', JSON.stringify({ token: data.token, refreshToken: data.refreshToken, user: userData }))
+                    // Auto-select tab based on role on refresh
+                    if (userData.role === 'cocina') setActiveTab('cocina')
+                    else if (userData.role === 'barra') setActiveTab('barra')
+                    else if (userData.role === 'caja') setActiveTab('caja')
                   } else {
                     localStorage.removeItem('restaurantos_auth')
                   }
@@ -5624,6 +5629,11 @@ export default function RestaurantPage() {
             // If token parsing fails, still try to use it
             setAuthToken(parsed.token)
             setCurrentUser(parsed.user)
+            // Auto-select tab based on role on fallback
+            const role = parsed.user?.role
+            if (role === 'cocina') setActiveTab('cocina')
+            else if (role === 'barra') setActiveTab('barra')
+            else if (role === 'caja') setActiveTab('caja')
           }
         }
       } catch { /* ignore */ }
@@ -5683,6 +5693,11 @@ export default function RestaurantPage() {
         setLoginRequiresRestaurant(false)
         setLoginRestaurantOptions([])
         setLoginSelectedSlug('')
+        // Auto-select the correct tab based on role
+        if (userData.role === 'cocina') setActiveTab('cocina')
+        else if (userData.role === 'barra') setActiveTab('barra')
+        else if (userData.role === 'caja') setActiveTab('caja')
+        else setActiveTab('camarero')
         // Check must change password
         if (userData.mustChangePassword) {
           setShowChangePasswordDialog(true)
