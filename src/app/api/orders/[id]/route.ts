@@ -2,6 +2,7 @@
 // /api/orders/[id] — Single order operations
 // GET  /api/orders/[id]  → Get order (requires orders:read)
 // PUT  /api/orders/[id]  → Update order (requires orders:update)
+//                          Cancel order (requires orders:cancel)
 // Multi-restaurant scoped, Zod validated, audit logged
 // ============================================================
 
@@ -12,6 +13,25 @@ import { validateInput, updateOrderSchema } from '@/lib/validations'
 import { createAuditLog } from '@/lib/audit'
 import { handleApiError } from '@/lib/errors'
 import { emitOrderStatusChanged, emitOrderReady } from '@/lib/realtime'
+
+const orderInclude = {
+  items: {
+    include: {
+      product: true,
+    },
+  },
+  table: true,
+  client: true,
+  createdBy: {
+    select: { id: true, username: true, name: true, role: true },
+  },
+  finishedBy: {
+    select: { id: true, username: true, name: true, role: true },
+  },
+  cancelledBy: {
+    select: { id: true, username: true, name: true, role: true },
+  },
+}
 
 // ─── GET /api/orders/[id] ───────────────────────────────────
 
@@ -32,21 +52,7 @@ export async function GET(
 
     const order = await db.order.findUnique({
       where: { id },
-      include: {
-        items: {
-          include: {
-            product: true,
-          },
-        },
-        table: true,
-        client: true,
-        createdBy: {
-          select: { id: true, username: true, name: true, role: true },
-        },
-        finishedBy: {
-          select: { id: true, username: true, name: true, role: true },
-        },
-      },
+      include: orderInclude,
     })
 
     // Data isolation: return 404 if order doesn't exist OR doesn't belong to restaurant
@@ -69,26 +75,33 @@ export async function PUT(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const auth = authenticateAndAuthorize(request, 'orders:update')
-  if ('error' in auth) return auth.error
-  const { user } = auth
-
-  const scope = requireRestaurantScope(user, request)
-  if ('error' in scope) return scope.error
-  const { restaurantId } = scope
-
-  // SaaS Subscription Guard: block order modification if restaurant is suspended
-  const subCheck = await requireActiveSubscription(restaurantId, user.role)
-  if ('error' in subCheck) return subCheck.error
-
   try {
     const { id } = await params
     const body = await request.json()
 
-    // Zod validation
+    // Zod validation first, so we know if this is a cancellation request.
     const validation = validateInput(updateOrderSchema, body)
     if (!validation.success) return validation.error
     const { status, notes } = validation.data
+
+    // Normal updates require orders:update.
+    // Cancellation is allowed with orders:cancel.
+    let auth = authenticateAndAuthorize(request, 'orders:update')
+
+    if ('error' in auth && status === 'cancelled') {
+      auth = authenticateAndAuthorize(request, 'orders:cancel')
+    }
+
+    if ('error' in auth) return auth.error
+    const { user } = auth
+
+    const scope = requireRestaurantScope(user, request)
+    if ('error' in scope) return scope.error
+    const { restaurantId } = scope
+
+    // SaaS Subscription Guard: block order modification if restaurant is suspended
+    const subCheck = await requireActiveSubscription(restaurantId, user.role)
+    if ('error' in subCheck) return subCheck.error
 
     const existing = await db.order.findUnique({
       where: { id },
@@ -103,7 +116,7 @@ export async function PUT(
       )
     }
 
-    // When status changes to "cancelled", restore stock
+    // When status changes to "cancelled", restore stock and save who cancelled it.
     if (status === 'cancelled' && existing.status !== 'cancelled') {
       const order = await db.$transaction(async (tx) => {
         // Restore stock for each item
@@ -114,25 +127,16 @@ export async function PUT(
           })
         }
 
-        // Update order status
+        // Update order status and cancellation audit fields
         const updatedOrder = await tx.order.update({
           where: { id },
-          data: { status: 'cancelled' },
-          include: {
-            items: {
-              include: {
-                product: true,
-              },
-            },
-            table: true,
-            client: true,
-            createdBy: {
-              select: { id: true, username: true, name: true, role: true },
-            },
-            finishedBy: {
-              select: { id: true, username: true, name: true, role: true },
-            },
+          data: {
+            status: 'cancelled',
+            cancelledById: user.userId,
+            cancelledAt: new Date(),
+            ...(notes !== undefined ? { notes } : {}),
           },
+          include: orderInclude,
         })
 
         // Check if table has other active orders (scoped to restaurant)
@@ -169,6 +173,7 @@ export async function PUT(
         details: {
           previousStatus: existing.status,
           tableId: existing.tableId,
+          cancelledById: user.userId,
         },
       })
 
@@ -187,21 +192,7 @@ export async function PUT(
         const updatedOrder = await tx.order.update({
           where: { id },
           data: updateData,
-          include: {
-            items: {
-              include: {
-                product: true,
-              },
-            },
-            table: true,
-            client: true,
-            createdBy: {
-              select: { id: true, username: true, name: true, role: true },
-            },
-            finishedBy: {
-              select: { id: true, username: true, name: true, role: true },
-            },
-          },
+          include: orderInclude,
         })
 
         return updatedOrder
@@ -237,21 +228,7 @@ export async function PUT(
         const updatedOrder = await tx.order.update({
           where: { id },
           data: updateData,
-          include: {
-            items: {
-              include: {
-                product: true,
-              },
-            },
-            table: true,
-            client: true,
-            createdBy: {
-              select: { id: true, username: true, name: true, role: true },
-            },
-            finishedBy: {
-              select: { id: true, username: true, name: true, role: true },
-            },
-          },
+          include: orderInclude,
         })
 
         // Check if table has other active (non-paid, non-cancelled) orders (scoped to restaurant)
@@ -301,21 +278,7 @@ export async function PUT(
     const order = await db.order.update({
       where: { id },
       data: updateData,
-      include: {
-        items: {
-          include: {
-            product: true,
-          },
-        },
-        table: true,
-        client: true,
-        createdBy: {
-          select: { id: true, username: true, name: true, role: true },
-        },
-        finishedBy: {
-          select: { id: true, username: true, name: true, role: true },
-        },
-      },
+      include: orderInclude,
     })
 
     // Emit real-time status change for any status update
