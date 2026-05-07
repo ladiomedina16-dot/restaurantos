@@ -47,13 +47,19 @@ export async function POST(request: Request) {
     }
 
     // Check if admin username already exists
-    const existingUser = await db.user.findFirst({ where: { username: adminUsername } })
-    if (existingUser) {
-      return NextResponse.json(
-        { error: 'El nombre de usuario ya existe.' },
-        { status: 409 }
-      )
-    }
+  const existingSuperAdmin = await db.user.findFirst({
+  where: {
+    username: adminUsername,
+    restaurantId: null,
+  },
+})
+
+if (existingSuperAdmin) {
+  return Response.json(
+    { error: 'El nombre de usuario ya existe como super_admin.' },
+    { status: 400 }
+  )
+}
 
     // Hash the admin password
     const passwordHash = await hashPassword(adminPassword)
