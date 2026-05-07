@@ -41,7 +41,7 @@ model Restaurant {
 // ─── USUARIOS ──────────────────────────────────────────────
 model User {
   id                 String   @id @default(cuid())
-  username           String   @unique
+  username           String
   passwordHash       String
   name               String   @default("")
   role               String   @default("camarero")
@@ -65,6 +65,7 @@ model User {
   @@index([restaurantId])
   @@index([role])
   @@index([active])
+  @@unique([username, restaurantId])
 }
 
 // ─── PRODUCTOS ──────────────────────────────────────────────
