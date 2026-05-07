@@ -1,15 +1,32 @@
 import type { Metadata, Viewport } from "next";
+import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { Toaster } from "@/components/ui/sonner";
+import { SWRegistrar } from "@/components/sw-registrar";
+
+const geistSans = Geist({
+  variable: "--font-geist-sans",
+  subsets: ["latin"],
+});
+
+const geistMono = Geist_Mono({
+  variable: "--font-geist-mono",
+  subsets: ["latin"],
+});
 
 export const viewport: Viewport = {
-  themeColor: "#ea580c",
+  themeColor: "#d97706",
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
 };
 
 export const metadata: Metadata = {
   title: "RestaurantOS - Restaurant Management",
-  description: "Sistema de gestión de restaurantes. Pedidos, caja, cocina y barra en tiempo real.",
-  keywords: ["restaurant", "management", "orders", "POS", "kitchen", "bar"],
+  description: "Modern restaurant management system. Manage products, tables, orders, and clients in real-time.",
+  keywords: ["restaurant", "management", "orders", "POS", "kitchen"],
+  manifest: "/manifest.json",
   icons: {
     icon: [
       { url: "/favicon.ico", sizes: "32x32" },
@@ -20,11 +37,10 @@ export const metadata: Metadata = {
       { url: "/apple-touch-icon.png", sizes: "180x180", type: "image/png" },
     ],
   },
-  manifest: "/manifest.webmanifest",
-  other: {
-    "apple-mobile-web-app-capable": "yes",
-    "apple-mobile-web-app-status-bar-style": "default",
-    "mobile-web-app-capable": "yes",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "default",
+    title: "RestaurantOS",
   },
 };
 
@@ -35,8 +51,11 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="es" suppressHydrationWarning>
-      <body className="antialiased bg-background text-foreground min-h-screen flex flex-col">
+      <body
+        className={`${geistSans.variable} ${geistMono.variable} antialiased bg-background text-foreground min-h-screen flex flex-col`}
+      >
         {children}
+        <SWRegistrar />
         <Toaster richColors position="top-right" />
       </body>
     </html>

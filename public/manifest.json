@@ -1,0 +1,33 @@
+{
+  "name": "RestaurantOS",
+  "short_name": "RestaurantOS",
+  "description": "Sistema de gestión de restaurantes. Productos, mesas, pedidos y clientes en tiempo real.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "theme_color": "#d97706",
+  "background_color": "#ffffff",
+  "lang": "es",
+  "categories": ["business", "food", "productivity"],
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/maskable-icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}
