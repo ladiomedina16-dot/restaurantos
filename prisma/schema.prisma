@@ -34,6 +34,7 @@ model Restaurant {
   cashSessions      CashSession[]
   supplierPayments  SupplierPayment[]
   auditLogs         AuditLog[]
+  settings          RestaurantSettings?
 
   @@index([subscriptionStatus])
 }
@@ -285,4 +286,25 @@ model SupplierPayment {
   @@index([cashSessionId])
   @@index([userId])
   @@index([createdAt])
+}
+
+// ─── CONFIGURACIÓN FISCAL / TICKET ─────────────────────────
+model RestaurantSettings {
+  id                  String   @id @default(cuid())
+  restaurantId        String   @unique
+  fiscalName          String   @default("")
+  taxId               String   @default("")
+  fiscalAddress       String   @default("")
+  phone               String   @default("")
+  email               String   @default("")
+  ticketLegalText     String   @default("")
+  defaultVatRate      Float    @default(21)
+  logoUrl             String   @default("")
+  defaultDocumentType String   @default("ticket")
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  restaurant Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+
+  @@index([restaurantId])
 }
