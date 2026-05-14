@@ -310,7 +310,7 @@ function useAuth() {
   return ctx
 }
 
-// ─── Print Helper ──────────────────────────────────────────────────────────
+// ─── Print Helper (manual on-demand) ────────────────────────────────────────
 // NOTE: La selección de impresora depende del navegador/sistema operativo.
 // Para impresión silenciosa se requiere QZ Tray, app local o Capacitor.
 
@@ -347,6 +347,64 @@ const handlePrintTicket = async (
     }
   } catch {
     toast.error('Error de red al imprimir ticket')
+  }
+}
+
+// ─── Print Job Helper (auto-print from queue) ───────────────────────────────
+// Processes a single PrintJob: opens print window, prints, marks as printed/failed.
+// Uses a Set to prevent duplicate printing of the same job.
+
+const _printingJobIds = new Set<string>()
+
+interface PrintJobItem {
+  id: string
+  html: string
+}
+
+const printJob = async (
+  job: PrintJobItem,
+  authHeaders: (contentType?: boolean) => Record<string, string>,
+  destination: 'kitchen' | 'bar',
+) => {
+  // Dedup guard: skip if already being processed
+  if (_printingJobIds.has(job.id)) return
+  _printingJobIds.add(job.id)
+
+  try {
+    const printWindow = window.open('', '_blank', 'width=320,height=600')
+    if (printWindow) {
+      printWindow.document.write(job.html)
+      printWindow.document.close()
+      printWindow.focus()
+      printWindow.print()
+      // Mark as printed
+      await fetch(`/api/print/jobs/${job.id}`, {
+        method: 'PATCH',
+        headers: authHeaders(),
+        body: JSON.stringify({ status: 'printed' }),
+      })
+    } else {
+      // Popup blocked — mark as failed
+      await fetch(`/api/print/jobs/${job.id}`, {
+        method: 'PATCH',
+        headers: authHeaders(),
+        body: JSON.stringify({ status: 'failed', error: 'Popup bloqueada' }),
+      })
+      const label = destination === 'kitchen' ? 'cocina' : 'barra'
+      toast.error(`Popup bloqueada al imprimir comanda ${label}. Permite popups para este sitio.`)
+    }
+  } catch {
+    // Mark as failed on any error
+    try {
+      await fetch(`/api/print/jobs/${job.id}`, {
+        method: 'PATCH',
+        headers: authHeaders(),
+        body: JSON.stringify({ status: 'failed', error: 'Error de impresión' }),
+      })
+    } catch { /* give up */ }
+  } finally {
+    // Always clean up the dedup set
+    _printingJobIds.delete(job.id)
   }
 }
 
@@ -1287,6 +1345,35 @@ function CocinaTab() {
     return () => clearInterval(interval)
   }, [fetchOrders])
 
+  // ─── Auto-print: poll pending kitchen print jobs ────────────
+  // NOTE: La selección de impresora depende del navegador/sistema operativo.
+  // Para impresión silenciosa se requiere QZ Tray, app local o Capacitor.
+  useEffect(() => {
+    if (!clientHasPermission(currentUser?.role ?? '', 'print:read')) return
+
+    const pollPrintJobs = async () => {
+      try {
+        const res = await fetch('/api/print/jobs?destination=kitchen', {
+          headers: authHeaders(false),
+        })
+        if (res.ok) {
+          const { jobs } = await res.json()
+          for (const job of jobs) {
+            await printJob(job, authHeaders, 'kitchen')
+          }
+        }
+      } catch {
+        // Silently fail — don't disrupt cocina workflow
+      }
+    }
+
+    // Poll every 4 seconds
+    const interval = setInterval(pollPrintJobs, 4000)
+    // Initial poll after a short delay to avoid race with auth
+    const timeout = setTimeout(pollPrintJobs, 2000)
+    return () => { clearInterval(interval); clearTimeout(timeout) }
+  }, [authHeaders, currentUser])
+
   // Update time display every 10 seconds
   useEffect(() => {
     const interval = setInterval(() => setNow(Date.now()), 10000)
@@ -1543,6 +1630,35 @@ function BarraTab() {
     const interval = setInterval(fetchOrders, 5000)
     return () => clearInterval(interval)
   }, [fetchOrders])
+
+  // ─── Auto-print: poll pending bar print jobs ────────────────
+  // NOTE: La selección de impresora depende del navegador/sistema operativo.
+  // Para impresión silenciosa se requiere QZ Tray, app local o Capacitor.
+  useEffect(() => {
+    if (!clientHasPermission(currentUser?.role ?? '', 'print:read')) return
+
+    const pollPrintJobs = async () => {
+      try {
+        const res = await fetch('/api/print/jobs?destination=bar', {
+          headers: authHeaders(false),
+        })
+        if (res.ok) {
+          const { jobs } = await res.json()
+          for (const job of jobs) {
+            await printJob(job, authHeaders, 'bar')
+          }
+        }
+      } catch {
+        // Silently fail — don't disrupt barra workflow
+      }
+    }
+
+    // Poll every 4 seconds
+    const interval = setInterval(pollPrintJobs, 4000)
+    // Initial poll after a short delay to avoid race with auth
+    const timeout = setTimeout(pollPrintJobs, 2000)
+    return () => { clearInterval(interval); clearTimeout(timeout) }
+  }, [authHeaders, currentUser])
 
   // Per-item ready: mark a single bar item as ready
   const handleItemReady = async (orderId: string, itemId: string) => {
