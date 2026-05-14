@@ -55,14 +55,24 @@ export async function POST(request: Request) {
       )
     }
 
-    // Fetch restaurant info
+    // Fetch restaurant info + fiscal settings
     const restaurant = await db.restaurant.findUnique({
       where: { id: restaurantId },
+      include: { settings: true },
     })
 
-    const restaurantName = restaurant?.name ?? 'RestaurantOS'
-    const restaurantAddress = restaurant?.address ?? ''
-    const restaurantPhone = restaurant?.phone ?? ''
+    // Fiscal data with fallback: settings → restaurant → defaults
+    const settings = restaurant?.settings
+    const fiscalName = settings?.fiscalName || restaurant?.name || 'RestaurantOS'
+    const fiscalAddress = settings?.fiscalAddress || restaurant?.address || ''
+    const fiscalPhone = settings?.phone || restaurant?.phone || ''
+    const fiscalEmail = settings?.email || ''
+    const taxId = settings?.taxId || ''
+    const vatRate = settings?.defaultVatRate ?? 21
+    const legalText = settings?.ticketLegalText || 'Gracias por su visita'
+    const documentType: 'ticket' | 'factura' =
+    settings?.defaultDocumentType === 'factura' ? 'factura' : 'ticket'
+    const logoUrl = settings?.logoUrl || ''
 
     // Filter items by ticket type
     let filteredItems = order.items
@@ -74,7 +84,7 @@ export async function POST(request: Request) {
         filteredItems = order.items.filter(
           (item) => !DRINK_CATEGORIES.includes(item.product.category)
         )
-        html = generateKitchenTicket(order, filteredItems, restaurantName)
+        html = generateKitchenTicket(order, filteredItems, fiscalName)
         break
 
       case 'bar':
@@ -82,16 +92,14 @@ export async function POST(request: Request) {
         filteredItems = order.items.filter((item) =>
           DRINK_CATEGORIES.includes(item.product.category)
         )
-        html = generateBarTicket(order, filteredItems, restaurantName)
+        html = generateBarTicket(order, filteredItems, fiscalName)
         break
 
       case 'receipt':
         html = generateReceiptTicket(
           order,
           order.items,
-          restaurantName,
-          restaurantAddress,
-          restaurantPhone
+          { fiscalName, fiscalAddress, fiscalPhone, fiscalEmail, taxId, vatRate, legalText, documentType, logoUrl }
         )
         break
     }
@@ -291,6 +299,20 @@ function generateBarTicket(
 </html>`
 }
 
+// ─── Fiscal Data Interface ──────────────────────────────────
+
+interface FiscalData {
+  fiscalName: string
+  fiscalAddress: string
+  fiscalPhone: string
+  fiscalEmail: string
+  taxId: string
+  vatRate: number
+  legalText: string
+  documentType: 'ticket' | 'factura'
+  logoUrl: string
+}
+
 // ─── Receipt Ticket Generator ──────────────────────────────
 
 function generateReceiptTicket(
@@ -320,9 +342,7 @@ function generateReceiptTicket(
     notes: string
     modifiers: string
   }[],
-  restaurantName: string,
-  restaurantAddress: string,
-  restaurantPhone: string
+  fiscal: FiscalData
 ): string {
   const now = new Date().toLocaleString('es-ES', {
     day: '2-digit',
@@ -331,6 +351,15 @@ function generateReceiptTicket(
     hour: '2-digit',
     minute: '2-digit',
   })
+
+  const isFactura = fiscal.documentType === 'factura'
+  const docTitle = isFactura ? 'FACTURA' : 'TICKET'
+
+  // Calculate IVA breakdown
+  const baseImponible = fiscal.vatRate > 0
+    ? order.total / (1 + fiscal.vatRate / 100)
+    : order.total
+  const ivaAmount = order.total - baseImponible
 
   const itemsHtml = items
     .map(
@@ -358,17 +387,24 @@ function generateReceiptTicket(
       ? `<div class="row"><span>Bebidas gratis</span><span>${payment.freeDrinks}</span></div>`
       : ''
 
+  const logoHtml = fiscal.logoUrl
+    ? `<img src="${fiscal.logoUrl}" alt="Logo" style="max-height:40px;max-width:60mm;margin:0 auto 4px;display:block;">`
+    : ''
+
   return `<!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8">
-<title>Recibo - ${restaurantName}</title>
+<title>${docTitle} - ${fiscal.fiscalName}</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body { font-family: 'Courier New', monospace; width: 80mm; padding: 4mm; font-size: 12px; }
   .header { text-align: center; border-bottom: 2px dashed #000; padding-bottom: 6px; margin-bottom: 6px; }
   .header h1 { font-size: 14px; font-weight: bold; }
-  .header .info { font-size: 10px; color: #555; margin-top: 2px; }
+  .header .fiscal-name { font-size: 15px; font-weight: bold; }
+  .header .info { font-size: 10px; color: #333; margin-top: 2px; }
+  .header .taxid { font-size: 11px; font-weight: bold; margin-top: 2px; }
+  .doc-type { text-align: center; font-size: 13px; font-weight: bold; margin: 4px 0; border: 1px solid #000; padding: 3px; }
   .meta { display: flex; justify-content: space-between; margin-bottom: 6px; font-size: 11px; border-bottom: 1px dotted #ccc; padding-bottom: 4px; }
   .item { display: flex; justify-content: space-between; padding: 2px 0; }
   .name { flex: 1; }
@@ -377,17 +413,23 @@ function generateReceiptTicket(
   .row { display: flex; justify-content: space-between; padding: 2px 0; }
   .discount { color: #c00; }
   .total-row { font-size: 16px; font-weight: bold; border-top: 2px solid #000; padding-top: 4px; margin-top: 4px; }
+  .vat-breakdown { margin-top: 4px; font-size: 10px; color: #555; }
   .payment-info { margin-top: 6px; padding: 4px; border: 1px solid #000; font-size: 11px; }
   .footer { text-align: center; margin-top: 8px; font-size: 10px; border-top: 2px dashed #000; padding-top: 6px; }
+  .legal { font-size: 9px; color: #666; margin-top: 4px; text-align: center; font-style: italic; }
   @media print { body { width: 80mm; } }
 </style>
 </head>
 <body>
   <div class="header">
-    <h1>${restaurantName}</h1>
-    ${restaurantAddress ? `<div class="info">${restaurantAddress}</div>` : ''}
-    ${restaurantPhone ? `<div class="info">Tel: ${restaurantPhone}</div>` : ''}
+    ${logoHtml}
+    <div class="fiscal-name">${fiscal.fiscalName}</div>
+    ${fiscal.taxId ? `<div class="taxid">${fiscal.taxId}</div>` : ''}
+    ${fiscal.fiscalAddress ? `<div class="info">${fiscal.fiscalAddress}</div>` : ''}
+    ${fiscal.fiscalPhone ? `<div class="info">Tel: ${fiscal.fiscalPhone}</div>` : ''}
+    ${fiscal.fiscalEmail ? `<div class="info">${fiscal.fiscalEmail}</div>` : ''}
   </div>
+  <div class="doc-type">${docTitle}</div>
   <div class="meta">
     <span>Mesa ${order.table.number}</span>
     <span>${now}</span>
@@ -408,12 +450,16 @@ function generateReceiptTicket(
     <span>TOTAL</span>
     <span>${order.total.toFixed(2)}€</span>
   </div>
+  ${fiscal.vatRate > 0 ? `<div class="vat-breakdown">
+    Base imponible: ${baseImponible.toFixed(2)}€ | IVA ${fiscal.vatRate}%: ${ivaAmount.toFixed(2)}€
+  </div>` : ''}
   <div class="payment-info">
     <div>Pago: ${paymentMethod}</div>
     ${payment ? `<div>Puntos ganados: ${payment.pointsEarned}</div>` : ''}
   </div>
   <div class="footer">
-    Gracias por su visita | Pedido #${order.id.slice(-6)}
+    ${fiscal.legalText}
+    <br>Pedido #${order.id.slice(-6)}
   </div>
 </body>
 </html>`

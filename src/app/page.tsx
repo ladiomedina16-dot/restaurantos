@@ -1096,6 +1096,18 @@ function CamareroTab() {
               <Euro className="size-6 mr-2" />
               {paying ? 'Cobrando...' : 'COBRAR'}
             </Button>
+
+            {/* Print receipt button */}
+            {cuentaOrders.length > 0 && (
+              <Button
+                variant="outline"
+                className="w-full h-10 mt-2"
+                onClick={() => handlePrintTicket('receipt', cuentaOrders[0].id, authHeaders)}
+              >
+                <Printer className="size-4 mr-2" />
+                Imprimir Recibo
+              </Button>
+            )}
           </div>
         )}
 
