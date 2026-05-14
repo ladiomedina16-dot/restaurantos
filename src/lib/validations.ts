@@ -228,10 +228,11 @@ export const updateSettingsSchema = z.object({
 
   // ─── Print ─────────────────────────────────────────────────
 
-  export const printTicketSchema = z.object({
-    type: z.enum(['kitchen', 'bar', 'receipt']),
-    orderId: z.string().min(1),
-  })
+ export const printTicketSchema = z.object({
+  type: z.enum(['kitchen', 'bar', 'receipt']),
+  orderId: z.string().min(1),
+  documentType: z.enum(['ticket', 'factura']).optional(),
+})
 
   // ─── Change Password ───────────────────────────────────────
 

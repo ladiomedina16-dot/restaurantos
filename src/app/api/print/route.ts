@@ -31,7 +31,7 @@ export async function POST(request: Request) {
     const validation = validateInput(printTicketSchema, body)
     if (!validation.success) return validation.error
 
-    const { type, orderId } = validation.data
+    const { type, orderId, documentType: docTypeOverride } = validation.data
 
     // Fetch the order with items and product details
     const order = await db.order.findFirst({
@@ -70,8 +70,11 @@ export async function POST(request: Request) {
     const taxId = settings?.taxId || ''
     const vatRate = settings?.defaultVatRate ?? 21
     const legalText = settings?.ticketLegalText || 'Gracias por su visita'
+    // Allow frontend to override document type (ticket vs factura)
     const documentType: 'ticket' | 'factura' =
-    settings?.defaultDocumentType === 'factura' ? 'factura' : 'ticket'
+  docTypeOverride === 'factura' || settings?.defaultDocumentType === 'factura'
+    ? 'factura'
+    : 'ticket'
     const logoUrl = settings?.logoUrl || ''
 
     // Filter items by ticket type
@@ -101,6 +104,8 @@ export async function POST(request: Request) {
           order.items,
           { fiscalName, fiscalAddress, fiscalPhone, fiscalEmail, taxId, vatRate, legalText, documentType, logoUrl }
         )
+        // NOTE: La selección de impresora depende del navegador/sistema operativo.
+        // Para impresión silenciosa se requiere QZ Tray, app local o Capacitor.
         break
     }
 
@@ -111,11 +116,11 @@ export async function POST(request: Request) {
       action: 'print_ticket',
       entityType: 'order',
       entityId: orderId,
-      details: { type, orderId, printedBy: user.username },
+      details: { type, orderId, documentType: type === 'receipt' ? documentType : undefined, printedBy: user.username },
       ipAddress: request.headers.get('x-forwarded-for') ?? undefined,
     })
 
-    return Response.json({ html, type, orderId })
+    return Response.json({ html, type, orderId, documentType: type === 'receipt' ? documentType : undefined })
   } catch (error) {
     return handleApiError('Print POST', error)
   }

@@ -105,9 +105,9 @@ const CLIENT_ROLE_PERMISSIONS: Record<string, string[]> = {
   super_admin: ['*'],
   admin: ['orders:read', 'orders:create', 'orders:update', 'orders:cancel', 'orders:pay', 'products:read', 'products:create', 'products:update', 'products:delete', 'tables:read', 'tables:create', 'tables:update', 'tables:delete', 'clients:read', 'clients:create', 'clients:update', 'clients:delete', 'users:read', 'users:create', 'users:update', 'users:delete', 'payments:read', 'dashboard:read', 'cash:read', 'cash:open', 'cash:close', 'print:read', 'audit:read'],
   encargado: ['orders:read', 'orders:create', 'orders:update', 'orders:cancel', 'orders:pay', 'products:read', 'products:update', 'tables:read', 'tables:update', 'clients:read', 'clients:create', 'clients:update', 'users:read', 'payments:read', 'dashboard:read', 'cash:read', 'cash:open', 'cash:close', 'print:read', 'audit:read'],
-  camarero: ['orders:read', 'orders:create', 'orders:update', 'orders:cancel', 'products:read', 'tables:read', 'clients:read', 'clients:create'],
-  cocina: ['orders:read', 'orders:update', 'products:read'],
-  barra: ['orders:read', 'orders:update', 'products:read'],
+  camarero: ['orders:read', 'orders:create', 'orders:update', 'orders:cancel', 'products:read', 'tables:read', 'clients:read', 'clients:create', 'print:read'],
+  cocina: ['orders:read', 'orders:update', 'products:read', 'print:read'],
+  barra: ['orders:read', 'orders:update', 'products:read', 'print:read'],
   caja: ['orders:read', 'orders:update', 'orders:cancel', 'orders:pay', 'products:read', 'tables:read', 'clients:read', 'payments:read', 'cash:read', 'cash:open', 'cash:close', 'print:read'],
 }
 
@@ -311,28 +311,42 @@ function useAuth() {
 }
 
 // ─── Print Helper ──────────────────────────────────────────────────────────
+// NOTE: La selección de impresora depende del navegador/sistema operativo.
+// Para impresión silenciosa se requiere QZ Tray, app local o Capacitor.
 
-const handlePrintTicket = async (type: 'kitchen' | 'bar' | 'receipt', orderId: string, authHeaders: (contentType?: boolean) => Record<string, string>) => {
+const handlePrintTicket = async (
+  type: 'kitchen' | 'bar' | 'receipt',
+  orderId: string,
+  authHeaders: (contentType?: boolean) => Record<string, string>,
+  documentType?: 'ticket' | 'factura',
+) => {
   try {
+    const body: Record<string, string> = { type, orderId }
+    if (documentType) body.documentType = documentType
+
     const res = await fetch('/api/print', {
       method: 'POST',
       headers: authHeaders(),
-      body: JSON.stringify({ type, orderId }),
+      body: JSON.stringify(body),
     })
     if (res.ok) {
       const { html } = await res.json()
       const printWindow = window.open('', '_blank', 'width=320,height=600')
-      if (printWindow) {
-        printWindow.document.write(html)
-        printWindow.document.close()
-        printWindow.focus()
-        printWindow.print()
+      if (!printWindow) {
+        toast.error('Ventana emergente bloqueada. Permite popups para este sitio.')
+        return
       }
+      printWindow.document.write(html)
+      printWindow.document.close()
+      printWindow.focus()
+      printWindow.print()
+      toast.success('Ticket enviado a impresión')
     } else {
-      toast.error('Error al imprimir ticket')
+      const err = await res.json().catch(() => ({ error: 'Error desconocido' }))
+      toast.error(err.error || 'Error al imprimir ticket')
     }
   } catch {
-    toast.error('Error al imprimir ticket')
+    toast.error('Error de red al imprimir ticket')
   }
 }
 
@@ -1097,16 +1111,26 @@ function CamareroTab() {
               {paying ? 'Cobrando...' : 'COBRAR'}
             </Button>
 
-            {/* Print receipt button */}
+            {/* Print ticket / factura buttons */}
             {cuentaOrders.length > 0 && (
-              <Button
-                variant="outline"
-                className="w-full h-10 mt-2"
-                onClick={() => handlePrintTicket('receipt', cuentaOrders[0].id, authHeaders)}
-              >
-                <Printer className="size-4 mr-2" />
-                Imprimir Recibo
-              </Button>
+              <div className="flex gap-2 mt-2">
+                <Button
+                  variant="outline"
+                  className="flex-1 h-10"
+                  onClick={() => handlePrintTicket('receipt', cuentaOrders[0].id, authHeaders, 'ticket')}
+                >
+                  <Printer className="size-4 mr-2" />
+                  Ticket
+                </Button>
+                <Button
+                  variant="outline"
+                  className="flex-1 h-10"
+                  onClick={() => handlePrintTicket('receipt', cuentaOrders[0].id, authHeaders, 'factura')}
+                >
+                  <FileText className="size-4 mr-2" />
+                  Factura
+                </Button>
+              </div>
             )}
           </div>
         )}
@@ -1446,6 +1470,17 @@ function CocinaTab() {
                   )
                 })}
               </div>
+
+              {/* Print kitchen ticket */}
+              <Button
+                variant="ghost"
+                size="sm"
+                className="mt-2 h-7 px-2 text-xs text-gray-400 hover:text-white hover:bg-gray-700"
+                onClick={() => handlePrintTicket('kitchen', order.id, authHeaders)}
+              >
+                <Printer className="size-3.5 mr-1" />
+                Imprimir cocina
+              </Button>
             </div>
           ))}
         </div>
@@ -1679,6 +1714,17 @@ function BarraTab() {
                   {order.client.name}
                 </p>
               )}
+
+              {/* Print bar ticket */}
+              <Button
+                variant="ghost"
+                size="sm"
+                className="mt-2 h-7 px-2 text-xs text-amber-500 hover:text-amber-900 hover:bg-amber-100"
+                onClick={() => handlePrintTicket('bar', order.id, authHeaders)}
+              >
+                <Printer className="size-3.5 mr-1" />
+                Imprimir barra
+              </Button>
             </div>
           ))}
         </div>
@@ -2102,20 +2148,33 @@ function CajaTab() {
                 </p>
               )}
 
-              {/* Print receipt button */}
-              <Button
-                variant="outline"
-                className="w-full h-12 mt-2"
-                onClick={() => {
-                  // Print receipt for the first selected order
-                  if (selectedOrders.length > 0) {
-                    handlePrintTicket('receipt', selectedOrders[0].id, authHeaders)
-                  }
-                }}
-              >
-                <Printer className="size-5 mr-2" />
-                Imprimir Recibo
-              </Button>
+              {/* Print ticket / factura buttons */}
+              <div className="flex gap-2 mt-2">
+                <Button
+                  variant="outline"
+                  className="flex-1 h-12"
+                  onClick={() => {
+                    if (selectedOrders.length > 0) {
+                      handlePrintTicket('receipt', selectedOrders[0].id, authHeaders, 'ticket')
+                    }
+                  }}
+                >
+                  <Printer className="size-4 mr-2" />
+                  Imprimir Ticket
+                </Button>
+                <Button
+                  variant="outline"
+                  className="flex-1 h-12"
+                  onClick={() => {
+                    if (selectedOrders.length > 0) {
+                      handlePrintTicket('receipt', selectedOrders[0].id, authHeaders, 'factura')
+                    }
+                  }}
+                >
+                  <FileText className="size-4 mr-2" />
+                  Imprimir Factura
+                </Button>
+              </div>
             </CardContent>
           </Card>
         </div>
