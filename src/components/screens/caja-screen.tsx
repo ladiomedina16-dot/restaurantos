@@ -78,7 +78,7 @@ export function CajaTab() {
 
   const fetchActiveOrders = useCallback(async () => {
     try {
-      const res = await fetch('/api/orders?status=pending,in_progress,ready,served', { headers: authHeaders(false) })
+      const res = await fetch('/api/orders?status=pending,in_progress,ready,served,bill_requested', { headers: authHeaders(false) })
       if (handleFetchResponse(res) && res.ok) {
         const json = await res.json()
         setOrders(json.orders)

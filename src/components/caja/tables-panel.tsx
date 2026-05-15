@@ -30,7 +30,8 @@ export function TablesPanel({
   hasReadyOrders,
   now,
 }: TablesPanelProps) {
-  const occupiedTables = tables.filter((t) => t.status === 'occupied')
+  const occupiedTables = tables.filter((t) => t.status === 'occupied' || t.status === 'bill_requested')
+  const billRequestedTables = tables.filter((t) => t.status === 'bill_requested')
 
   const tablesByZone = zoneOrder
     .map((z) => ({
@@ -52,6 +53,11 @@ export function TablesPanel({
           <Badge variant="outline" className="text-[10px] bg-gray-100 text-gray-600 border-gray-200 px-1.5 py-0">
             {occupiedTables.length}
           </Badge>
+          {billRequestedTables.length > 0 && (
+            <Badge className="text-[10px] bg-amber-100 text-amber-700 border border-amber-300 px-1.5 py-0">
+              {billRequestedTables.length} cuenta{billRequestedTables.length > 1 ? 's' : ''} pedida{billRequestedTables.length > 1 ? 's' : ''}
+            </Badge>
+          )}
         </div>
       </div>
 
@@ -83,6 +89,7 @@ export function TablesPanel({
                   {zoneTables.map((table) => {
                     const tableOrders = getTableOrders(table.id)
                     const isReady = hasReadyOrders(table.id)
+                    const isBillRequested = table.status === 'bill_requested'
                     const orderTotal = tableOrders.reduce((s, o) => s + (o.subtotal ?? o.total), 0)
                     const itemCount = tableOrders.reduce((s, o) => s + o.items.length, 0)
                     const isSelected = selectedTableId === table.id
@@ -96,19 +103,28 @@ export function TablesPanel({
                         key={table.id}
                         className={`w-full p-3 rounded-xl border-2 transition-all text-left active:scale-[0.97] min-h-[110px] flex flex-col justify-between ${
                           isSelected
-                            ? 'bg-emerald-50 border-emerald-400 shadow-md shadow-emerald-100'
+                            ? isBillRequested
+                              ? 'bg-amber-50 border-amber-400 shadow-md shadow-amber-100'
+                              : 'bg-emerald-50 border-emerald-400 shadow-md shadow-emerald-100'
+                            : isBillRequested
+                            ? 'bg-amber-50/50 border-amber-300 hover:border-amber-400 hover:shadow-sm'
                             : isReady
                             ? 'bg-emerald-50/30 border-emerald-300 hover:border-emerald-400 hover:shadow-sm'
                             : 'bg-white border-gray-200 hover:border-emerald-300 hover:bg-gray-50 hover:shadow-sm'
                         }`}
                         onClick={() => onSelectTable(table.id)}
                       >
-                        {/* Top row: Mesa number + Ready badge */}
+                        {/* Top row: Mesa number + Status badge */}
                         <div className="flex items-start justify-between gap-1">
-                          <span className={`text-base font-extrabold leading-tight ${isSelected ? 'text-emerald-700' : 'text-gray-800'}`}>
+                          <span className={`text-base font-extrabold leading-tight ${isSelected ? (isBillRequested ? 'text-amber-700' : 'text-emerald-700') : 'text-gray-800'}`}>
                             Mesa {table.number}
                           </span>
-                          {isReady && (
+                          {isBillRequested && (
+                            <Badge className="text-[8px] bg-amber-500 text-white border-0 px-1.5 py-0 rounded-full shrink-0 animate-pulse">
+                              CUENTA
+                            </Badge>
+                          )}
+                          {!isBillRequested && isReady && (
                             <Badge className="text-[8px] bg-emerald-500 text-white border-0 px-1.5 py-0 rounded-full shrink-0 animate-pulse">
                               LISTO
                             </Badge>
@@ -117,7 +133,7 @@ export function TablesPanel({
 
                         {/* Total — large and prominent */}
                         <div className="mt-1">
-                          <span className="text-lg font-black text-emerald-600 leading-tight">
+                          <span className={`text-lg font-black leading-tight ${isBillRequested ? 'text-amber-600' : 'text-emerald-600'}`}>
                             {formatEUR(orderTotal)}
                           </span>
                         </div>

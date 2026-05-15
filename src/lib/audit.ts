@@ -34,7 +34,7 @@ export type AuditAction =
   | 'onboarding_completed'
   | 'subscription_changed'
   | 'supplier_payment_created'
-  
+  | 'bill_requested'
 
 export type EntityType =
   | 'order'

@@ -3,9 +3,6 @@
 // GET  /api/orders       → List orders (requires orders:read)
 // POST /api/orders       → Create order (requires orders:create)
 // Multi-restaurant scoped, Zod validated, audit logged
-// v5: destination calculated by backend (bebida→bar, else→kitchen)
-//     cancelledBy included in GET responses
-//     PrintJobs auto-created for kitchen/bar comandas
 // ============================================================
 
 import { db } from '@/lib/db'
@@ -15,45 +12,17 @@ import { validateInput, createOrderSchema } from '@/lib/validations'
 import { createAuditLog } from '@/lib/audit'
 import { handleApiError } from '@/lib/errors'
 import { emitOrderCreated } from '@/lib/realtime'
-import { generateKitchenTicket, generateBarTicket } from '@/lib/print-templates'
-
-// ─── Shared include for order queries ──────────────────────────
-const orderInclude = {
-  table: true,
-  client: true,
-  items: {
-    include: {
-      product: true,
-    },
-  },
-  createdBy: {
-    select: { id: true, username: true, name: true, role: true },
-  },
-  finishedBy: {
-    select: { id: true, username: true, name: true, role: true },
-  },
-  cancelledBy: {
-    select: { id: true, username: true, name: true, role: true },
-  },
-}
+import { DRINK_CATEGORIES, generateKitchenTicket, generateBarTicket } from '@/lib/print-templates'
 
 // ─── GET /api/orders ────────────────────────────────────────
 
 export async function GET(request: Request) {
   const auth = authenticateAndAuthorize(request, 'orders:read')
-  if ('error' in auth) {
-    console.log('[Orders GET] ❌ authenticateAndAuthorize FAILED — no permission or bad token')
-    return auth.error
-  }
+  if ('error' in auth) return auth.error
   const { user } = auth
 
-  console.log(`[Orders GET] User: role=${user.role}, restaurantId=${user.restaurantId ?? 'MISSING'}, zone=${user.zone ?? 'none'}`)
-
   const scope = requireRestaurantScope(user, request)
-  if ('error' in scope) {
-    console.log(`[Orders GET] ❌ requireRestaurantScope FAILED — user.restaurantId=${user.restaurantId ?? 'MISSING'}`)
-    return scope.error
-  }
+  if ('error' in scope) return scope.error
   const { restaurantId } = scope
 
   try {
@@ -61,9 +30,6 @@ export async function GET(request: Request) {
     const status = searchParams.get('status')
     const tableId = searchParams.get('tableId')
     const clientId = searchParams.get('clientId')
-    const destination = searchParams.get('destination') // bar | kitchen — filter by item destination
-
-    console.log(`[Orders GET] Params: status=${status}, destination=${destination}, tableId=${tableId}, clientId=${clientId}, restaurantId=${restaurantId}`)
 
     const where: Record<string, unknown> = { restaurantId }
 
@@ -89,78 +55,29 @@ export async function GET(request: Request) {
     if (userZone) {
       where.table = { zone: userZone }
     }
-    console.log(`[Orders GET] Zone filter: ${userZone ?? 'none (all zones)'} — getZoneFilter returned: ${userZone ?? 'null'}`)
-
-    // Destination filtering: only return orders that have items with the matching destination
-    // that are NOT yet ready (pending items for that destination)
-    if (destination === 'bar' || destination === 'kitchen') {
-      where.items = {
-        some: {
-          destination,
-          status: { not: 'ready' },
-        },
-      }
-    }
-
-    console.log('[Orders GET] Prisma where:', JSON.stringify(where, null, 2))
 
     const orders = await db.order.findMany({
       where,
-      include: orderInclude,
+      include: {
+        table: true,
+        client: true,
+        items: {
+          include: {
+            product: true,
+          },
+        },
+        createdBy: {
+          select: { id: true, username: true, name: true, role: true },
+        },
+        finishedBy: {
+          select: { id: true, username: true, name: true, role: true },
+        },
+      },
       orderBy: { createdAt: 'desc' },
     })
 
-    console.log(`[Orders GET] Raw results: ${orders.length} orders found`)
-
-    orders.forEach((order) => {
-      console.log(
-        `[Orders GET]   Order ${order.id}: status=${order.status}, table=${order.table?.number}, items=${order.items.length}`,
-        order.items.map((i) => ({
-          id: i.id,
-          name: i.product?.name,
-          dest: i.destination,
-          status: i.status,
-        }))
-      )
-    })
-
-    // Debug: log when destination filter is used and results are unexpected
-    if (destination && orders.length === 0) {
-      const totalOrders = await db.order.count({
-        where: { restaurantId, status: { in: ['pending', 'in_progress'] } },
-      })
-
-      const totalItems = await db.orderItem.count({
-        where: {
-          destination,
-          status: { not: 'ready' },
-          order: { restaurantId },
-        },
-      })
-
-      console.log(`[Orders GET] ⚠️ destination=${destination}: 0 results. Total active orders: ${totalOrders}, Total ${destination} pending items: ${totalItems}`)
-    }
-
-    // When destination is specified, filter items to ONLY include
-    // items matching that destination with status !== 'ready'.
-    // This prevents Barra from seeing cocina items and vice versa.
-    if (destination === 'bar' || destination === 'kitchen') {
-      const filteredOrders = orders
-        .map((order) => ({
-          ...order,
-          items: order.items.filter(
-            (item) => item.destination === destination && item.status !== 'ready'
-          ),
-        }))
-        .filter((order) => order.items.length > 0)
-
-      console.log(`[Orders GET] After item-level filter: ${filteredOrders.length} orders with ${destination} items`)
-      return NextResponse.json({ orders: filteredOrders })
-    }
-
     return NextResponse.json({ orders })
   } catch (error) {
-    console.error('[Orders GET] ❌ Error:', error)
     return handleApiError('Orders GET', error)
   }
 }
@@ -192,7 +109,6 @@ export async function POST(request: Request) {
     const table = await db.table.findFirst({
       where: { id: tableId, restaurantId },
     })
-
     if (!table) {
       return NextResponse.json(
         { error: 'Table not found' },
@@ -200,17 +116,10 @@ export async function POST(request: Request) {
       )
     }
 
-    // Require open cash session before taking orders
-    const openSession = await db.cashSession.findFirst({
-      where: {
-        restaurantId,
-        status: 'open',
-      },
-    })
-
-    if (!openSession) {
+    // Block new orders if table has bill requested (cuenta pedida)
+    if (table.status === 'bill_requested') {
       return NextResponse.json(
-        { error: 'Debes abrir caja antes de tomar pedidos.' },
+        { error: 'No se pueden añadir pedidos. La cuenta ya ha sido solicitada para esta mesa.' },
         { status: 400 }
       )
     }
@@ -220,7 +129,6 @@ export async function POST(request: Request) {
       const client = await db.client.findFirst({
         where: { id: clientId, restaurantId },
       })
-
       if (!client) {
         return NextResponse.json(
           { error: 'Client not found' },
@@ -238,24 +146,20 @@ export async function POST(request: Request) {
 
     // Validate all products exist and have sufficient stock
     const productMap = new Map(products.map((p) => [p.id, p]))
-
     for (const item of items) {
       const product = productMap.get(item.productId)
-
       if (!product) {
         return NextResponse.json(
           { error: `Product ${item.productId} not found` },
           { status: 404 }
         )
       }
-
       if (!product.active) {
         return NextResponse.json(
           { error: `Product "${product.name}" is not available` },
           { status: 400 }
         )
       }
-
       if (product.stock < item.quantity) {
         return NextResponse.json(
           { error: `Sin stock: "${product.name}". Disponible: ${product.stock}, Pedido: ${item.quantity}` },
@@ -265,14 +169,12 @@ export async function POST(request: Request) {
     }
 
     // Calculate subtotals from DB prices only, include modifiers
-    // Backend calculates destination based on product category:
-    //   bebida → "bar", everything else → "kitchen"
+    // Also determine destination: bebida → bar, everything else → kitchen
     const orderItemsData = items.map((item) => {
       const product = productMap.get(item.productId)!
       const unitPrice = product.price
       const subtotal = unitPrice * item.quantity
-      const destination = product.category === 'bebida' ? 'bar' : 'kitchen'
-
+      const destination = DRINK_CATEGORIES.includes(product.category) ? 'bar' : 'kitchen'
       return {
         productId: item.productId,
         quantity: item.quantity,
@@ -281,20 +183,10 @@ export async function POST(request: Request) {
         notes: item.notes ?? '',
         modifiers: item.modifiers ? JSON.stringify(item.modifiers) : '',
         destination,
-        status: 'pending',
       }
     })
 
     const subtotal = orderItemsData.reduce((sum, item) => sum + item.subtotal, 0)
-
-    console.log(
-      '[Orders POST] Item destinations:',
-      orderItemsData.map((i) => ({
-        productId: i.productId,
-        destination: i.destination,
-        status: i.status,
-      }))
-    )
 
     // Use transaction to ensure atomicity
     const order = await db.$transaction(async (tx) => {
@@ -360,49 +252,52 @@ export async function POST(request: Request) {
     await emitOrderCreated(order)
 
     // ─── Auto-create PrintJobs for kitchen/bar comandas ──────────
-    // El camarero NO imprime ni elige impresora.
-    // Cocina/Barra imprimen desde sus propias pantallas locales usando window.print().
-    // Si falla la creación de trabajos de impresión, NO se bloquea el pedido.
+    // The order already has items with product info from the transaction
     try {
       const restaurantInfo = await db.restaurant.findUnique({
         where: { id: restaurantId },
         select: { name: true },
       })
+      const restName = restaurantInfo?.name || 'RestaurantOS'
 
-      const restaurantName = restaurantInfo?.name || 'RestaurantOS'
-
+      // Determine destinations from order items
       const kitchenItems = order.items.filter(
-        (item) => item.destination === 'kitchen'
+        (item) => !DRINK_CATEGORIES.includes(item.product.category)
+      )
+      const barItems = order.items.filter((item) =>
+        DRINK_CATEGORIES.includes(item.product.category)
       )
 
-      const barItems = order.items.filter(
-        (item) => item.destination === 'bar'
-      )
-
-      const printJobsData: { destination: 'kitchen' | 'bar'; html: string }[] = []
+      const printJobsData: { destination: string; html: string }[] = []
 
       if (kitchenItems.length > 0) {
-        const kitchenHtml = generateKitchenTicket(order, kitchenItems, restaurantName)
+        const kitchenHtml = generateKitchenTicket(order, kitchenItems, restName)
         printJobsData.push({ destination: 'kitchen', html: kitchenHtml })
       }
 
       if (barItems.length > 0) {
-        const barHtml = generateBarTicket(order, barItems, restaurantName)
+        const barHtml = generateBarTicket(order, barItems, restName)
         printJobsData.push({ destination: 'bar', html: barHtml })
       }
 
+      // Create all print jobs in parallel
       if (printJobsData.length > 0) {
-        await db.printJob.createMany({
-          data: printJobsData.map((job) => ({
-            restaurantId,
-            orderId: order.id,
-            destination: job.destination,
-            html: job.html,
-            status: 'pending',
-          })),
-        })
+        await Promise.all(
+          printJobsData.map((pj) =>
+            db.printJob.create({
+              data: {
+                restaurantId,
+                orderId: order.id,
+                destination: pj.destination,
+                html: pj.html,
+                status: 'pending',
+              },
+            })
+          )
+        )
       }
     } catch (printErr) {
+      // Print job creation failure should NOT block order creation
       console.error('[Orders POST] Error creating print jobs:', printErr)
     }
 

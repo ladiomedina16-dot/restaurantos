@@ -132,7 +132,7 @@ export function CamareroTab() {
   const fetchCuentaOrders = useCallback(async (tableId: string) => {
     setCuentaLoading(true)
     try {
-      const res = await fetch(`/api/orders?status=pending,in_progress,ready,served&tableId=${tableId}`, { headers: authHeaders(false) })
+      const res = await fetch(`/api/orders?status=pending,in_progress,ready,served,bill_requested&tableId=${tableId}`, { headers: authHeaders(false) })
       if (handleFetchResponse(res) && res.ok) {
         const json = await res.json()
         setCuentaOrders(json.orders)
@@ -145,7 +145,7 @@ export function CamareroTab() {
   // Fetch existing orders for the currently selected table
   const fetchTableOrders = useCallback(async (tableId: string) => {
     try {
-      const url = `/api/orders?status=pending,in_progress,ready,served&tableId=${tableId}`
+      const url = `/api/orders?status=pending,in_progress,ready,served,bill_requested&tableId=${tableId}`
       console.log('[Camarero] fetchTableOrders:', url)
       const res = await fetch(url, { headers: authHeaders(false) })
       console.log('[Camarero] fetchTableOrders response:', res.status)
@@ -254,6 +254,34 @@ export function CamareroTab() {
     setView('cuenta')
   }
 
+  // Request bill: mark table as bill_requested (blocks further orders)
+  const [requestingBill, setRequestingBill] = useState(false)
+  const handleRequestBill = async (table: TableItem) => {
+    setRequestingBill(true)
+    try {
+      const res = await fetch(`/api/tables/${table.id}/request-bill`, {
+        method: 'POST',
+        headers: authHeaders(),
+      })
+      if (handleFetchResponse(res) && res.ok) {
+        toast.success('Cuenta solicitada. Caja debe cobrar.')
+        // Refresh table data
+        fetchTables()
+        // Update selectedTable locally
+        setSelectedTable({ ...table, status: 'bill_requested' })
+        // Refresh table orders
+        fetchTableOrders(table.id)
+      } else {
+        const err = await res.json()
+        toast.error(err.error || 'Error al pedir la cuenta')
+      }
+    } catch {
+      toast.error('Error de red')
+    } finally {
+      setRequestingBill(false)
+    }
+  }
+
   const handleCancelOrder = async () => {
     if (!cancelTargetId) return
     setCancelling(true)
@@ -353,6 +381,7 @@ export function CamareroTab() {
   // ─── Menu View ───────────────────────────────────────────────
   if (view === 'menu' && selectedTable) {
     const isOccupied = selectedTable.status === 'occupied'
+    const isBillRequested = selectedTable.status === 'bill_requested'
     return (
       <div className="flex flex-col h-[calc(100vh-10rem)]">
         {/* Header */}
@@ -361,7 +390,7 @@ export function CamareroTab() {
             <ArrowLeft className="size-5" />
           </Button>
           <div className="flex items-center gap-2">
-            <div className="flex size-10 items-center justify-center rounded-lg bg-amber-100 text-amber-800 font-bold text-lg">
+            <div className={`flex size-10 items-center justify-center rounded-lg font-bold text-lg ${isBillRequested ? 'bg-amber-100 text-amber-800' : 'bg-amber-100 text-amber-800'}`}>
               {selectedTable.number}
             </div>
             <div>
@@ -370,14 +399,21 @@ export function CamareroTab() {
             </div>
           </div>
           <div className="ml-auto flex items-center gap-2">
+            {isBillRequested && (
+              <Badge className="bg-amber-500 text-white text-xs animate-pulse">
+                <Receipt className="size-3 mr-1" />
+                Cuenta pedida
+              </Badge>
+            )}
             {isOccupied && (
               <Button
                 size="sm"
-                className="h-10 bg-green-600 hover:bg-green-700 text-white"
-                onClick={() => handlePedirCuenta(selectedTable)}
+                className="h-10 bg-amber-600 hover:bg-amber-700 text-white"
+                onClick={() => handleRequestBill(selectedTable)}
+                disabled={requestingBill}
               >
-                <Euro className="size-4 mr-1" />
-                Cobrar
+                <Receipt className="size-4 mr-1" />
+                {requestingBill ? 'Solicitando...' : 'Pedir cuenta'}
               </Button>
             )}
             <Button
@@ -385,12 +421,24 @@ export function CamareroTab() {
               size="sm"
               className="h-10"
               onClick={() => setShowClientSearch(!showClientSearch)}
+              disabled={isBillRequested}
             >
               <UserCircle className="size-4 mr-1" />
               {selectedClientId ? clients.find((c) => c.id === selectedClientId)?.name ?? 'Cliente' : 'Cliente'}
             </Button>
           </div>
         </div>
+
+        {/* Bill requested warning banner */}
+        {isBillRequested && (
+          <div className="bg-amber-50 border-b border-amber-200 px-4 py-3 flex items-center gap-2">
+            <Receipt className="size-5 text-amber-600 shrink-0" />
+            <div>
+              <p className="text-sm font-bold text-amber-800">Mesa bloqueada — Cuenta pedida</p>
+              <p className="text-xs text-amber-600">No se pueden añadir más productos. Caja debe cobrar.</p>
+            </div>
+          </div>
+        )}
 
         {/* Existing orders for this table */}
         {tableOrders.length > 0 && (
@@ -412,14 +460,16 @@ export function CamareroTab() {
                     <Badge
                       variant="outline"
                       className={
-                        order.status === 'ready'
+                        order.status === 'bill_requested'
+                          ? 'bg-amber-100 text-amber-800 border-amber-200 text-xs'
+                          : order.status === 'ready'
                           ? 'bg-green-100 text-green-800 border-green-200 text-xs'
                           : order.status === 'pending'
                           ? 'bg-amber-100 text-amber-800 border-amber-200 text-xs'
                           : 'bg-orange-100 text-orange-800 border-orange-200 text-xs'
                       }
                     >
-                      {order.status === 'ready' ? '✅ Listo' : order.status === 'pending' ? '⏳ Pendiente' : '🔥 En curso'}
+                      {order.status === 'bill_requested' ? '🧾 Cuenta pedida' : order.status === 'ready' ? '✅ Listo' : order.status === 'pending' ? '⏳ Pendiente' : '🔥 En curso'}
                     </Badge>
                     <div className="flex items-center gap-1">
                       <span className="text-xs text-muted-foreground">{formatTime(order.createdAt)}</span>
@@ -536,9 +586,15 @@ export function CamareroTab() {
           })}
         </div>
 
-        {/* Product grid */}
+        {/* Product grid — blocked when bill_requested */}
         <div className="flex-1 overflow-y-auto p-3">
-          {filteredProducts.length === 0 ? (
+          {isBillRequested ? (
+            <div className="flex flex-col items-center justify-center py-12 text-amber-500">
+              <Receipt className="size-12 mb-3 opacity-30" />
+              <p className="text-sm font-medium">No se pueden añadir productos</p>
+              <p className="text-xs text-amber-400 mt-1">La cuenta ya ha sido solicitada</p>
+            </div>
+          ) : filteredProducts.length === 0 ? (
             <p className="text-center text-muted-foreground py-8">No hay productos en esta categoría</p>
           ) : (
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
@@ -564,8 +620,8 @@ export function CamareroTab() {
           )}
         </div>
 
-        {/* Order summary bar */}
-        {currentOrderItems.length > 0 && (
+        {/* Order summary bar — hidden when bill_requested */}
+        {!isBillRequested && currentOrderItems.length > 0 && (
           <div className="border-t bg-amber-50 flex flex-col max-h-[35vh] md:max-h-[45vh] shrink-0">
             <ScrollArea className="flex-1 overflow-y-auto p-3 pb-1">
               <div className="space-y-2">
@@ -898,12 +954,15 @@ export function CamareroTab() {
                 const isAvailable = table.status === 'available'
                 const isOccupied = table.status === 'occupied'
                 const isReserved = table.status === 'reserved'
+                const isBillRequested = table.status === 'bill_requested'
                 return (
                   <button
                     key={table.id}
                     className={`flex flex-col items-center justify-center p-4 rounded-xl border-2 transition-all min-h-[100px] active:scale-95 ${
                       isAvailable
                         ? 'bg-green-50 border-green-300 hover:bg-green-100 hover:border-green-500'
+                        : isBillRequested
+                        ? 'bg-amber-50 border-amber-400 hover:bg-amber-100'
                         : isOccupied
                         ? 'bg-orange-50 border-orange-300 hover:bg-orange-100'
                         : isReserved
@@ -914,9 +973,14 @@ export function CamareroTab() {
                   >
                     <span className="text-3xl font-bold">{table.number}</span>
                     <span className="text-xs mt-1 capitalize">
-                      {isAvailable ? '🟢 Libre' : isOccupied ? '🔴 Ocupada' : isReserved ? '🟡 Reservada' : table.status}
+                      {isAvailable ? '🟢 Libre' : isBillRequested ? '🟠 Cuenta pedida' : isOccupied ? '🔴 Ocupada' : isReserved ? '🟡 Reservada' : table.status}
                     </span>
                     <span className="text-xs text-muted-foreground">{table.capacity} pax</span>
+                    {isBillRequested && (
+                      <Badge className="mt-1 bg-amber-500 text-white text-[10px] px-2 py-0">
+                        <Receipt className="size-2.5 mr-0.5" />Pendiente cobro
+                      </Badge>
+                    )}
                     {isOccupied && (
                       <button
                         className="mt-1 px-3 py-1 bg-amber-600 text-white text-xs font-bold rounded-full active:scale-95"

@@ -69,7 +69,7 @@
     number: z.coerce.number().int().min(1).max(999).optional(),
     capacity: z.coerce.number().int().min(1).max(50).optional(),
     zone: z.enum(['main', 'terrace', 'private', 'bar']).optional(),
-    status: z.enum(['available', 'occupied', 'reserved']).optional(),
+    status: z.enum(['available', 'occupied', 'reserved', 'bill_requested']).optional(),
     notes: z.string().max(200).optional(),
     active: z.boolean().optional(),
   })
@@ -108,10 +108,10 @@
     items: z.array(orderItemInputSchema).min(1, 'El pedido debe tener al menos un item').max(50),
   })
 
-  export const updateOrderSchema = z.object({
-    status: z.enum(['pending', 'in_progress', 'ready', 'served', 'paid', 'cancelled']).optional(),
-    notes: z.string().max(500).optional(),
-  })
+ export const updateOrderSchema = z.object({
+  status: z.enum(['pending', 'in_progress', 'ready', 'served', 'bill_requested', 'paid', 'cancelled']).optional(),
+  notes: z.string().max(500).optional(),
+})
 
   export const updateOrderItemSchema = z.object({
     status: z.enum(['pending', 'ready']).optional(),

@@ -150,14 +150,16 @@ export function TablePaymentDialog({
                 <Badge
                   variant="outline"
                   className={`text-[9px] px-1.5 py-0 ${
-                    order.status === 'ready'
+                    order.status === 'bill_requested'
+                      ? 'bg-amber-50 text-amber-700 border-amber-300'
+                      : order.status === 'ready'
                       ? 'bg-emerald-50 text-emerald-700 border-emerald-300'
                       : order.status === 'pending'
                       ? 'bg-amber-50 text-amber-700 border-amber-300'
                       : 'bg-orange-50 text-orange-700 border-orange-300'
                   }`}
                 >
-                  {order.status === 'ready' ? '✅ Listo' : order.status === 'pending' ? '⏳ Pendiente' : '🔥 En curso'}
+                  {order.status === 'bill_requested' ? '🧾 Cuenta pedida' : order.status === 'ready' ? '✅ Listo' : order.status === 'pending' ? '⏳ Pendiente' : '🔥 En curso'}
                 </Badge>
                 <span className="text-[9px] text-gray-400 flex items-center gap-0.5">
                   <Clock className="size-2.5" />{formatTime(order.createdAt)}
