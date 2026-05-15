@@ -16,7 +16,7 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   // Camarero, encargado, admin, super_admin can request bill
-  const auth = authenticateAndAuthorize(request, 'orders:update')
+  const auth = authenticateAndAuthorize(request, 'bill:request')
   if ('error' in auth) return auth.error
   const { user } = auth
 

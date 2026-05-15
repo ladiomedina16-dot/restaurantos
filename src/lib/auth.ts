@@ -130,6 +130,7 @@ export const ROLE_PERMISSIONS: Record<UserRole, string[]> = {
     'cash:read', 'cash:open', 'cash:close',
     'print:read',
     'audit:read',
+    'bill:request',
   ],
   encargado: [
     'orders:read', 'orders:create', 'orders:update', 'orders:pay',
@@ -141,20 +142,25 @@ export const ROLE_PERMISSIONS: Record<UserRole, string[]> = {
     'cash:read', 'cash:open', 'cash:close',
     'print:read',
     'audit:read',
+    'bill:request',
   ],
   camarero: [
-    'orders:read', 'orders:create', 'orders:cancel',
+    'orders:read', 'orders:create',
     'products:read',
     'tables:read',
     'clients:read', 'clients:create',
+    'print:read',
+    'bill:request',
   ],
   cocina: [
     'orders:read', 'orders:update', // can mark orders as ready
     'products:read',
+    'print:read',
   ],
   barra: [
     'orders:read', 'orders:update', // can mark bar items as ready
     'products:read',
+    'print:read',
   ],
   caja: [
     'orders:read', 'orders:pay',
@@ -178,13 +184,15 @@ export function canAccessTab(role: UserRole, tab: string): boolean {
   switch (tab) {
     case 'camarero':
       return ['super_admin', 'admin', 'encargado', 'camarero'].includes(role)
-    case 'barra':
-      return ['super_admin', 'admin', 'encargado', 'barra'].includes(role)
     case 'cocina':
       return ['super_admin', 'admin', 'encargado', 'cocina'].includes(role)
+    case 'barra':
+      return ['super_admin', 'admin', 'encargado', 'barra'].includes(role)
     case 'caja':
       return ['super_admin', 'admin', 'encargado', 'caja'].includes(role)
     case 'reportes':
+      return ['super_admin', 'admin', 'encargado'].includes(role)
+    case 'settings':
       return ['super_admin', 'admin', 'encargado'].includes(role)
     case 'dashboard':
     case 'products':

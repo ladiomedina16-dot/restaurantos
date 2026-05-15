@@ -5,20 +5,14 @@ import {
   ArrowLeft,
   Plus,
   Search,
-  CheckCircle,
   XCircle,
   Minus,
   Flame,
-  Beer,
   UserCircle,
-  Euro,
   X,
   Pencil,
   ShoppingCart,
   Receipt,
-  Printer,
-  FileText,
-  CreditCard,
   CircleDot,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -46,11 +40,10 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
-import { useRestaurantStore, type TabId } from '@/lib/store'
+import { useRestaurantStore } from '@/lib/store'
 import { toast } from 'sonner'
 import type { Product, TableItem, Order, Client } from '@/types/restaurant'
 import { formatEUR, formatTime } from '@/lib/formatters'
-import { handlePrintTicket } from '@/lib/print-client'
 import { zoneOrder, categoryOrder } from '@/lib/constants'
 import { categoryConfig, zoneConfig } from '@/lib/config-ui'
 import { useAuth } from '@/components/common/auth-context'
@@ -73,8 +66,8 @@ export function CamareroTab() {
   const [clients, setClients] = useState<Client[]>([])
   const [loading, setLoading] = useState(true)
 
-  // Flow state: 'tables' | 'menu' | 'cuenta'
-  const [view, setView] = useState<'tables' | 'menu' | 'cuenta'>('tables')
+  // Flow state: 'tables' | 'menu'
+  const [view, setView] = useState<'tables' | 'menu'>('tables')
   const [selectedTable, setSelectedTable] = useState<TableItem | null>(null)
   const [selectedClientId, setSelectedClientId] = useState('')
   const [clientSearch, setClientSearch] = useState('')
@@ -91,12 +84,7 @@ export function CamareroTab() {
   // Existing orders for the selected table (shown in menu view)
   const [tableOrders, setTableOrders] = useState<Order[]>([])
 
-  // Cuenta (bill) state
-  const [cuentaTable, setCuentaTable] = useState<TableItem | null>(null)
-  const [cuentaOrders, setCuentaOrders] = useState<Order[]>([])
-  const [cuentaLoading, setCuentaLoading] = useState(false)
-  const [paymentMethod, setPaymentMethod] = useState<'efectivo' | 'tarjeta'>('efectivo')
-  const [paying, setPaying] = useState(false)
+  // No cuenta/cobrar state — camarero only requests bill, caja handles payment
 
   const fetchTables = useCallback(async () => {
     try {
@@ -129,18 +117,7 @@ export function CamareroTab() {
     } catch { /* silently fail */ }
   }, [authHeaders, handleFetchResponse])
 
-  const fetchCuentaOrders = useCallback(async (tableId: string) => {
-    setCuentaLoading(true)
-    try {
-      const res = await fetch(`/api/orders?status=pending,in_progress,ready,served,bill_requested&tableId=${tableId}`, { headers: authHeaders(false) })
-      if (handleFetchResponse(res) && res.ok) {
-        const json = await res.json()
-        setCuentaOrders(json.orders)
-      }
-    } catch { /* silently fail */ } finally {
-      setCuentaLoading(false)
-    }
-  }, [authHeaders, handleFetchResponse])
+  // fetchCuentaOrders removed — camarero no longer needs it
 
   // Fetch existing orders for the currently selected table
   const fetchTableOrders = useCallback(async (tableId: string) => {
@@ -246,14 +223,6 @@ export function CamareroTab() {
     }
   }
 
-  const handlePedirCuenta = (table: TableItem) => {
-    setCuentaTable(table)
-    setCuentaOrders([])
-    setPaymentMethod('efectivo')
-    fetchCuentaOrders(table.id)
-    setView('cuenta')
-  }
-
   // Request bill: mark table as bill_requested (blocks further orders)
   const [requestingBill, setRequestingBill] = useState(false)
   const handleRequestBill = async (table: TableItem) => {
@@ -267,10 +236,11 @@ export function CamareroTab() {
         toast.success('Cuenta solicitada. Caja debe cobrar.')
         // Refresh table data
         fetchTables()
-        // Update selectedTable locally
-        setSelectedTable({ ...table, status: 'bill_requested' })
-        // Refresh table orders
-        fetchTableOrders(table.id)
+        // Update selectedTable locally if this is the current table
+        if (selectedTable?.id === table.id) {
+          setSelectedTable({ ...table, status: 'bill_requested' })
+          fetchTableOrders(table.id)
+        }
       } else {
         const err = await res.json()
         toast.error(err.error || 'Error al pedir la cuenta')
@@ -293,7 +263,6 @@ export function CamareroTab() {
       })
       if (handleFetchResponse(res) && res.ok) {
         toast.success('Pedido cancelado')
-        if (cuentaTable) fetchCuentaOrders(cuentaTable.id)
         if (selectedTable) fetchTableOrders(selectedTable.id)
         fetchTables()
         setCancelTargetId(null)
@@ -313,44 +282,7 @@ export function CamareroTab() {
     }
   }
 
-  const handleCobrar = async () => {
-    if (!cuentaTable || cuentaOrders.length === 0) return
-    setPaying(true)
-    try {
-      for (const order of cuentaOrders) {
-        const res = await fetch(`/api/orders/${order.id}/pay`, {
-          method: 'POST',
-          headers: authHeaders(),
-          body: JSON.stringify({ applyDiscount: true, paymentMethod }),
-        })
-        if (!handleFetchResponse(res) || !res.ok) {
-          const err = await res.json()
-          toast.error(err.error || 'Error al cobrar')
-          setPaying(false)
-          return
-        }
-      }
-      toast.success(`Mesa ${cuentaTable.number} cobrada — ${formatEUR(cuentaTotal)}`)
-      setCuentaTable(null)
-      setCuentaOrders([])
-      setView('tables')
-      fetchTables()
-    } catch {
-      toast.error('Error de red')
-    } finally {
-      setPaying(false)
-    }
-  }
-
-  // Cuenta totals
-  const cuentaAllItems = cuentaOrders.flatMap((o) => o.items)
-  const cuentaSubtotal = cuentaAllItems.reduce((sum, item) => sum + item.subtotal, 0)
-  const cuentaBebidasTotal = cuentaAllItems.filter((i) => i.product?.category === 'bebida').reduce((s, i) => s + i.quantity, 0)
-  const cuentaFreeDrinks = Math.floor(cuentaBebidasTotal / 5)
-  const cuentaDiscount = cuentaFreeDrinks * 1.50
-  const cuentaHasClient = cuentaOrders.some((o) => o.clientId !== null)
-  const cuentaFinalDiscount = cuentaHasClient ? cuentaDiscount : 0
-  const cuentaTotal = Math.max(0, cuentaSubtotal - cuentaFinalDiscount)
+  // handleCobrar removed — camarero does not charge. Caja handles payment.
 
   // Filter products by active category and search
   const filteredProducts = products.filter((p) => {
@@ -745,177 +677,6 @@ export function CamareroTab() {
     )
   }
 
-  // ─── Cuenta View ───────────────────────────────────────────
-  if (view === 'cuenta' && cuentaTable) {
-    return (
-      <div className="flex flex-col min-h-[calc(100vh-10rem)]">
-        {/* Header */}
-        <div className="flex items-center gap-3 pb-3 border-b">
-          <Button variant="outline" size="sm" className="h-12" onClick={() => { setView('tables'); setCuentaTable(null); setCuentaOrders([]) }}>
-            <ArrowLeft className="size-5" />
-          </Button>
-          <div className="flex items-center gap-2">
-            <div className="flex size-10 items-center justify-center rounded-lg bg-amber-100 text-amber-800 font-bold text-lg">
-              {cuentaTable.number}
-            </div>
-            <div>
-              <p className="font-bold text-lg">Mesa {cuentaTable.number}</p>
-              <p className="text-xs text-muted-foreground">{zoneConfig[cuentaTable.zone]?.label ?? cuentaTable.zone}</p>
-            </div>
-          </div>
-          <Euro className="size-6 ml-auto text-amber-600" />
-        </div>
-
-        {/* Orders list */}
-        <div className="flex-1 overflow-y-auto p-3 space-y-3">
-          {cuentaLoading ? (
-            <div className="flex items-center justify-center py-12">
-              <div className="flex items-center gap-2 text-amber-600">
-                <Receipt className="size-6 animate-pulse" />
-                <span>Cargando cuenta...</span>
-              </div>
-            </div>
-          ) : cuentaOrders.length === 0 ? (
-            <div className="text-center py-12 text-muted-foreground">
-              <Receipt className="size-12 mx-auto mb-3 opacity-30" />
-              <p>No hay pedidos activos para esta mesa</p>
-            </div>
-          ) : (
-            cuentaOrders.map((order) => (
-              <Card key={order.id} className="rounded-xl">
-                <CardContent className="p-3">
-                  <div className="flex items-center justify-between mb-2">
-                    <Badge
-                      variant="outline"
-                      className={
-                        order.status === 'ready'
-                          ? 'bg-green-100 text-green-800 border-green-200'
-                          : order.status === 'pending'
-                          ? 'bg-amber-100 text-amber-800 border-amber-200'
-                          : 'bg-orange-100 text-orange-800 border-orange-200'
-                      }
-                    >
-                      {order.status === 'ready' ? '✅ Listo' : order.status === 'pending' ? '⏳ Pendiente' : '🔥 En curso'}
-                    </Badge>
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs text-muted-foreground">{formatTime(order.createdAt)}</span>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-7 w-7 p-0 text-red-500 hover:text-red-700 hover:bg-red-50"
-                        onClick={() => setCancelTargetId(order.id)}
-                        title="Cancelar pedido"
-                      >
-                        <XCircle className="size-4" />
-                      </Button>
-                    </div>
-                  </div>
-                  <div className="space-y-1">
-                    {order.items.map((item) => (
-                      <div key={item.id} className="flex justify-between text-sm">
-                        <div>
-                          <span><span className="font-medium">{item.quantity}x</span> {item.product?.name ?? 'Producto'}</span>
-                          {item.notes && <span className="text-xs text-muted-foreground ml-2">📝 {item.notes}</span>}
-                        </div>
-                        <span className="text-muted-foreground">{formatEUR(item.subtotal)}</span>
-                      </div>
-                    ))}
-                  </div>
-                </CardContent>
-              </Card>
-            ))
-          )}
-        </div>
-
-        {/* Payment section - fixed at bottom */}
-        {cuentaOrders.length > 0 && (
-          <div className="border-t bg-white p-4 shadow-lg">
-            {/* 5ª gratis notice */}
-            {cuentaHasClient && cuentaFreeDrinks > 0 && (
-              <div className="flex justify-between text-sm text-green-700 mb-2">
-                <span><Beer className="size-3 inline mr-1" />5ª GRATIS: {cuentaFreeDrinks} bebida{cuentaFreeDrinks > 1 ? 's' : ''} gratis</span>
-                <span>-{formatEUR(cuentaFinalDiscount)}</span>
-              </div>
-            )}
-            
-            <div className="flex justify-between text-xl font-bold mb-3">
-              <span>Total</span>
-              <span className="text-amber-700">{formatEUR(cuentaTotal)}</span>
-            </div>
-
-            <div className="flex gap-2 mb-3">
-              <Button
-                variant={paymentMethod === 'efectivo' ? 'default' : 'outline'}
-                className={`flex-1 h-14 text-base font-semibold ${paymentMethod === 'efectivo' ? 'bg-green-600 hover:bg-green-700 text-white' : ''}`}
-                onClick={() => setPaymentMethod('efectivo')}
-              >
-                <Euro className="size-5 mr-2" />
-                Efectivo
-              </Button>
-              <Button
-                variant={paymentMethod === 'tarjeta' ? 'default' : 'outline'}
-                className={`flex-1 h-14 text-base font-semibold ${paymentMethod === 'tarjeta' ? 'bg-amber-600 hover:bg-amber-700 text-white' : ''}`}
-                onClick={() => setPaymentMethod('tarjeta')}
-              >
-                <CreditCard className="size-5 mr-2" />
-                Tarjeta
-              </Button>
-            </div>
-
-            <Button
-              className="w-full h-16 text-xl font-bold bg-green-600 hover:bg-green-700 text-white"
-              onClick={handleCobrar}
-              disabled={paying || cuentaOrders.length === 0}
-            >
-              <Euro className="size-6 mr-2" />
-              {paying ? 'Cobrando...' : 'COBRAR'}
-            </Button>
-
-            {/* Print ticket / factura buttons */}
-            {cuentaOrders.length > 0 && (
-              <div className="flex gap-2 mt-2">
-                <Button
-                  variant="outline"
-                  className="flex-1 h-10"
-                  onClick={() => handlePrintTicket('receipt', cuentaOrders[0].id, authHeaders, 'ticket')}
-                >
-                  <Printer className="size-4 mr-2" />
-                  Ticket
-                </Button>
-                <Button
-                  variant="outline"
-                  className="flex-1 h-10"
-                  onClick={() => handlePrintTicket('receipt', cuentaOrders[0].id, authHeaders, 'factura')}
-                >
-                  <FileText className="size-4 mr-2" />
-                  Factura
-                </Button>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Cancel confirmation dialog */}
-        <AlertDialog open={cancelTargetId !== null} onOpenChange={(open) => { if (!open) setCancelTargetId(null) }}>
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>¿Cancelar pedido?</AlertDialogTitle>
-              <AlertDialogDescription>
-                Se cancelará el pedido. Los productos volverán al stock y la mesa quedará libre si no tiene otros pedidos activos.
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel onClick={() => setCancelTargetId(null)}>No, mantener</AlertDialogCancel>
-              <AlertDialogAction className="bg-red-600 hover:bg-red-700 text-white" onClick={handleCancelOrder} disabled={cancelling}>
-                {cancelling ? 'Cancelando...' : 'Sí, cancelar pedido'}
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
-      </div>
-    )
-  }
-
   // ─── Table Selection View ────────────────────────────────────
   return (
     <div className="space-y-4">
@@ -984,9 +745,10 @@ export function CamareroTab() {
                     {isOccupied && (
                       <button
                         className="mt-1 px-3 py-1 bg-amber-600 text-white text-xs font-bold rounded-full active:scale-95"
-                        onClick={(e) => { e.stopPropagation(); handlePedirCuenta(table) }}
+                        onClick={(e) => { e.stopPropagation(); handleRequestBill(table) }}
+                        disabled={requestingBill}
                       >
-                        <Euro className="size-3 inline mr-0.5" /> Cuenta
+                        <Receipt className="size-3 inline mr-0.5" /> {requestingBill ? 'Solicitando...' : 'Pedir cuenta'}
                       </button>
                     )}
                   </button>
