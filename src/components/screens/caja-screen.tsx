@@ -171,10 +171,20 @@ export function CajaTab() {
     setPaying(true)
     try {
       for (const order of selectedOrders) {
+        // Build payment body with mixto split amounts
+        const payBody: Record<string, unknown> = {
+          applyDiscount: true,
+          paymentMethod: selectedPaymentMethod,
+        }
+        if (selectedPaymentMethod === 'mixto') {
+          payBody.amountCash = parseFloat(mixtoEfectivo) || 0
+          payBody.amountCard = parseFloat(mixtoTarjeta) || 0
+        }
+
         const res = await fetch(`/api/orders/${order.id}/pay`, {
           method: 'POST',
           headers: authHeaders(),
-          body: JSON.stringify({ applyDiscount: true, paymentMethod: selectedPaymentMethod }),
+          body: JSON.stringify(payBody),
         })
         if (!handleFetchResponse(res) || !res.ok) {
           const err = await res.json()
@@ -197,10 +207,22 @@ export function CajaTab() {
       setSelectedPaymentMethod('efectivo')
       setMixtoEfectivo('')
       setMixtoTarjeta('')
-      fetchTables()
-      fetchActiveOrders()
-      fetchCashSession()
-      fetchSupplierPayments()
+      // Refresh data sequentially: cash session first (supplier payments depend on it)
+      await fetchTables()
+      await fetchActiveOrders()
+      await fetchCashSession()
+      // fetchSupplierPayments depends on cashSession.id which updates after fetchCashSession
+      // We need to fetch supplier payments AFTER cash session state is updated
+      // Since React state updates are async, we fetch directly here using the known session ID
+      if (cashSession?.id) {
+        try {
+          const spRes = await fetch(`/api/supplier-payments?cashSessionId=${cashSession.id}`, { headers: authHeaders(false) })
+          if (handleFetchResponse(spRes) && spRes.ok) {
+            const spJson = await spRes.json()
+            setSupplierPayments(spJson.supplierPayments)
+          }
+        } catch { /* silently fail */ }
+      }
     } catch {
       toast.error('Error de red')
     } finally {
@@ -467,6 +489,7 @@ export function CajaTab() {
         onOpenCash={() => { setShowCashSummary(false); setShowOpenCashDialog(true) }}
         onCloseCash={() => { setShowCashSummary(false); setShowCloseCashDialog(true) }}
         onAddSupplier={() => setShowSupplierDialog(true)}
+        onRefresh={() => { fetchCashSession(); if (cashSession?.id) { fetch(`/api/supplier-payments?cashSessionId=${cashSession.id}`, { headers: authHeaders(false) }).then(r => r.ok ? r.json() : null).then(j => j && setSupplierPayments(j.supplierPayments)).catch(() => {}) } }}
       />
 
       {/* ─── Cash Session Dialogs ───────────────────────────── */}

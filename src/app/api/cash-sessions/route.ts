@@ -51,16 +51,44 @@ export async function GET(request: Request) {
             orderBy: { createdAt: 'desc' },
           },
           supplierPayments: {
-            include: {
-              user: {
-                select: { id: true, username: true, name: true },
-              },
-            },
             orderBy: { createdAt: 'desc' },
           },
         },
         orderBy: { openedAt: 'desc' },
       })
+
+      // For open sessions, compute real-time totals from linked payments
+      // as a safety net (DB fields are now also updated atomically on payment)
+      if (openSession) {
+        const computedTotalCash = Math.round(
+          openSession.payments
+            .filter((p) => p.method === 'efectivo')
+            .reduce((sum, p) => sum + p.amount, 0) * 100
+        ) / 100
+        const computedTotalCard = Math.round(
+          openSession.payments
+            .filter((p) => p.method === 'tarjeta')
+            .reduce((sum, p) => sum + p.amount, 0) * 100
+        ) / 100
+        const computedTotalSales = Math.round(
+          openSession.payments
+            .reduce((sum, p) => sum + p.amount, 0) * 100
+        ) / 100
+        const computedTotalSuppliers = Math.round(
+          openSession.supplierPayments
+            .reduce((sum, sp) => sum + sp.amount, 0) * 100
+        ) / 100
+        const computedExpectedCash = Math.round(
+          (openSession.openingCash + computedTotalCash - computedTotalSuppliers) * 100
+        ) / 100
+
+        // Override DB values with computed values for the response
+        openSession.totalCash = computedTotalCash
+        openSession.totalCard = computedTotalCard
+        openSession.totalSales = computedTotalSales
+        openSession.totalSuppliers = computedTotalSuppliers
+        openSession.expectedCash = computedExpectedCash
+      }
 
       return Response.json({ cashSession: openSession })
     }

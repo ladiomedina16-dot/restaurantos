@@ -1,8 +1,9 @@
 'use client'
 
+import { useEffect, useRef } from 'react'
 import {
   Lock, CheckCircle, Wallet, Banknote, CreditCard,
-  TrendingUp, Flame, Plus, X, Clock,
+  TrendingUp, Flame, Plus, X, Clock, RefreshCw,
 } from 'lucide-react'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
@@ -20,6 +21,7 @@ interface CashSummaryDialogProps {
   onOpenCash: () => void
   onCloseCash: () => void
   onAddSupplier: () => void
+  onRefresh?: () => void
 }
 
 export function CashSummaryDialog({
@@ -30,7 +32,16 @@ export function CashSummaryDialog({
   onOpenCash,
   onCloseCash,
   onAddSupplier,
+  onRefresh,
 }: CashSummaryDialogProps) {
+  // Refresh data when dialog opens
+  const prevOpenRef = useRef(false)
+  useEffect(() => {
+    if (open && !prevOpenRef.current && onRefresh) {
+      onRefresh()
+    }
+    prevOpenRef.current = open
+  }, [open, onRefresh])
   /* ── Closed state ── */
   if (!cashSession) {
     return (
@@ -73,8 +84,8 @@ export function CashSummaryDialog({
   const totalCash = cashSession.totalCash ?? 0
   const totalCard = cashSession.totalCard ?? 0
   const totalSuppliers = cashSession.totalSuppliers ?? supplierPayments.reduce((s, sp) => s + sp.amount, 0)
-  const expectedCash = openingCash + totalCash - totalSuppliers
-  const totalSales = totalCash + totalCard
+  const expectedCash = cashSession.expectedCash ?? (openingCash + totalCash - totalSuppliers)
+  const totalSales = cashSession.totalSales ?? (totalCash + totalCard)
 
   /* ── Open state ── */
   return (
@@ -89,14 +100,27 @@ export function CashSummaryDialog({
               Abierta
             </Badge>
           </div>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-8 w-8 p-0 text-gray-400 hover:text-gray-600 hover:bg-gray-100"
-            onClick={() => onOpenChange(false)}
-          >
-            <X className="size-5" />
-          </Button>
+          <div className="flex items-center gap-1">
+            {onRefresh && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-8 w-8 p-0 text-gray-400 hover:text-emerald-600 hover:bg-emerald-50"
+                onClick={onRefresh}
+                title="Actualizar datos"
+              >
+                <RefreshCw className="size-4" />
+              </Button>
+            )}
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8 w-8 p-0 text-gray-400 hover:text-gray-600 hover:bg-gray-100"
+              onClick={() => onOpenChange(false)}
+            >
+              <X className="size-5" />
+            </Button>
+          </div>
         </div>
 
         <ScrollArea className="flex-1 min-h-0">

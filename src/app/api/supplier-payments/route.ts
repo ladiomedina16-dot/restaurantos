@@ -77,19 +77,31 @@ export async function POST(request: Request) {
 
     const { concept, amount } = validation.data
 
-    const supplierPayment = await db.supplierPayment.create({
-      data: {
-        concept,
-        amount,
-        userId: user.userId,
-        restaurantId,
-        cashSessionId: openSession.id,
-      },
-      include: {
-        user: {
-          select: { id: true, username: true, name: true },
+    const supplierPayment = await db.$transaction(async (tx) => {
+      const sp = await tx.supplierPayment.create({
+        data: {
+          concept,
+          amount,
+          userId: user.userId,
+          restaurantId,
+          cashSessionId: openSession.id,
         },
-      },
+        include: {
+          user: {
+            select: { id: true, username: true, name: true },
+          },
+        },
+      })
+
+      // Update CashSession totalSuppliers atomically
+      await tx.cashSession.update({
+        where: { id: openSession.id },
+        data: {
+          totalSuppliers: { increment: Math.round(amount * 100) / 100 },
+        },
+      })
+
+      return sp
     })
 
     // Audit log
