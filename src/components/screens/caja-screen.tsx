@@ -6,19 +6,20 @@ import { useAuth } from '@/components/common/auth-context'
 import { toast } from 'sonner'
 import type { TableItem, Order, SupplierPaymentItem } from '@/types/restaurant'
 import { formatEUR, formatTime } from '@/lib/formatters'
+import { handlePrintTicket } from '@/lib/print-client'
 
 // ─── Sub-components ──────────────────────────────────────────────────────────
 import { TablesPanel } from '@/components/caja/tables-panel'
 import { type PaymentMethod } from '@/components/caja/payment-panel'
 import { QuickProductsPanel } from '@/components/caja/quick-products-panel'
-import { CashSummaryPanel } from '@/components/caja/cash-summary-panel'
+import { CashSummaryDialog } from '@/components/caja/cash-summary-dialog'
 import { CashSessionDialogs } from '@/components/caja/cash-session-dialogs'
 import { TablePaymentDialog } from '@/components/caja/table-payment-dialog'
 import { Calculator } from '@/components/caja/calculator'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Store, Clock, User, LogOut, Unlock } from 'lucide-react'
+import { Store, Clock, User, LogOut, Unlock, Wallet } from 'lucide-react'
 
 // ─── CAJA TAB — Light-themed POS Layout ─────────────────────────────────────
 
@@ -60,6 +61,9 @@ export function CajaTab() {
 
   // ─── Payment Dialog State ─────────────────────────────────────
   const [showPaymentDialog, setShowPaymentDialog] = useState(false)
+
+  // ─── Cash Summary Dialog State ────────────────────────────────
+  const [showCashSummary, setShowCashSummary] = useState(false)
 
   // ─── Fetch Callbacks (PRESERVED EXACTLY) ───────────────────
   const fetchTables = useCallback(async () => {
@@ -180,6 +184,14 @@ export function CajaTab() {
         }
       }
       toast.success(`Mesa ${selectedTable?.number ?? '?'} cobrada — ${formatEUR(total)}`)
+
+      // Auto-print ticket for each paid order (fire-and-forget, don't block)
+      for (const order of selectedOrders) {
+        handlePrintTicket('receipt', order.id, authHeaders, 'ticket').catch(() => {
+          toast.error('No se pudo imprimir el ticket automáticamente')
+        })
+      }
+
       setPayingTable(null)
       setShowPaymentDialog(false)
       setSelectedPaymentMethod('efectivo')
@@ -187,6 +199,8 @@ export function CajaTab() {
       setMixtoTarjeta('')
       fetchTables()
       fetchActiveOrders()
+      fetchCashSession()
+      fetchSupplierPayments()
     } catch {
       toast.error('Error de red')
     } finally {
@@ -343,6 +357,14 @@ export function CajaTab() {
               Caja Cerrada
             </Badge>
           )}
+          <Button
+            size="sm"
+            className="bg-slate-700 hover:bg-slate-600 text-white text-xs h-7 gap-1"
+            onClick={() => setShowCashSummary(true)}
+          >
+            <Wallet className="size-3" />
+            Resumen de Caja
+          </Button>
           <span className="text-slate-300 flex items-center gap-1">
             <User className="size-3" />
             Cajero
@@ -369,7 +391,7 @@ export function CajaTab() {
         </div>
       </header>
 
-      {/* ─── 2-Column Main: Tables (70%) | Products + Cash (30%) ─── */}
+      {/* ─── 2-Column Main: Tables (70%) | Products (30%) ─── */}
       <div className="flex-1 grid grid-cols-[1fr_360px] gap-0 min-h-0 border-x border-gray-200">
         {/* LEFT/CENTER: Mesas Ocupadas — ocupa ~70% del ancho */}
         <div className="min-h-0 border-r border-gray-200">
@@ -388,20 +410,11 @@ export function CajaTab() {
           />
         </div>
 
-        {/* RIGHT: Products + Cash Info */}
-        <div className="min-h-0 flex flex-col">
-          <div className="flex-1 min-h-0">
-            <QuickProductsPanel
-              authHeaders={authHeaders}
-              handleFetchResponse={handleFetchResponse}
-            />
-          </div>
-          <CashSummaryPanel
-            cashSession={cashSession}
-            onOpenCash={() => setShowOpenCashDialog(true)}
-            onCloseCash={() => setShowCloseCashDialog(true)}
-            supplierPayments={supplierPayments}
-            onAddSupplier={() => setShowSupplierDialog(true)}
+        {/* RIGHT: Products (full height) */}
+        <div className="min-h-0">
+          <QuickProductsPanel
+            authHeaders={authHeaders}
+            handleFetchResponse={handleFetchResponse}
           />
         </div>
       </div>
@@ -443,6 +456,17 @@ export function CajaTab() {
         authHeaders={authHeaders}
         onCancelOrder={handleCancelOrder}
         onShowCalculator={() => setShowCalculator(true)}
+      />
+
+      {/* ─── Cash Summary Dialog ──────────────────────────────── */}
+      <CashSummaryDialog
+        open={showCashSummary}
+        onOpenChange={setShowCashSummary}
+        cashSession={cashSession}
+        supplierPayments={supplierPayments}
+        onOpenCash={() => { setShowCashSummary(false); setShowOpenCashDialog(true) }}
+        onCloseCash={() => { setShowCashSummary(false); setShowCloseCashDialog(true) }}
+        onAddSupplier={() => setShowSupplierDialog(true)}
       />
 
       {/* ─── Cash Session Dialogs ───────────────────────────── */}

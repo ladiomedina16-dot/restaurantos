@@ -62,7 +62,7 @@ export function QuickProductsPanel({ authHeaders, handleFetchResponse }: QuickPr
       <div className="px-3 py-2.5 border-b border-gray-200 shrink-0">
         <div className="flex items-center gap-1.5">
           <Package className="size-4 text-gray-500" />
-          <h3 className="text-xs font-bold text-gray-800 uppercase tracking-wider">Productos Rápidos</h3>
+          <h3 className="text-sm font-bold text-gray-800 uppercase tracking-wider">Productos Rápidos</h3>
           <Badge variant="outline" className="text-[9px] bg-gray-50 text-gray-500 border-gray-200 ml-auto px-1.5 py-0">
             {products.length}
           </Badge>
@@ -77,7 +77,7 @@ export function QuickProductsPanel({ authHeaders, handleFetchResponse }: QuickPr
             placeholder="Buscar producto..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="h-8 pl-8 pr-7 text-xs bg-gray-50 border-gray-200 text-gray-800 placeholder:text-gray-400 focus-visible:ring-emerald-200"
+            className="h-9 pl-8 pr-7 text-sm bg-gray-50 border-gray-200 text-gray-800 placeholder:text-gray-400 focus-visible:ring-emerald-200"
           />
           {search && (
             <button
@@ -94,7 +94,7 @@ export function QuickProductsPanel({ authHeaders, handleFetchResponse }: QuickPr
       <div className="px-3 py-2 border-b border-gray-200 shrink-0">
         <div className="flex gap-1 overflow-x-auto pb-0.5 scrollbar-none">
           <button
-            className={`h-6 px-2.5 text-[10px] font-medium rounded-full shrink-0 border transition-colors ${
+            className={`h-7 px-3 text-xs font-medium rounded-full shrink-0 border transition-colors ${
               !selectedCategory
                 ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
                 : 'bg-gray-50 text-gray-500 border-gray-200 hover:bg-gray-100'
@@ -108,7 +108,7 @@ export function QuickProductsPanel({ authHeaders, handleFetchResponse }: QuickPr
             return (
               <button
                 key={cat}
-                className={`h-6 px-2.5 text-[10px] font-medium rounded-full shrink-0 border transition-colors ${
+                className={`h-7 px-3 text-xs font-medium rounded-full shrink-0 border transition-colors ${
                   selectedCategory === cat
                     ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
                     : 'bg-gray-50 text-gray-500 border-gray-200 hover:bg-gray-100'
@@ -122,23 +122,23 @@ export function QuickProductsPanel({ authHeaders, handleFetchResponse }: QuickPr
         </div>
       </div>
 
-      {/* Products Grid — scrollable, 4 cols */}
+      {/* Products Grid — scrollable, 3 cols with bigger cards */}
       <ScrollArea className="flex-1 min-h-0">
-        <div className="p-3 space-y-3">
+        <div className="p-3 space-y-4">
           {groupedByCategory.map(({ category, config: cfg, products: catProducts }) => (
             <div key={category}>
-              <p className="text-[10px] text-gray-400 font-semibold uppercase tracking-wider px-0.5 mb-1.5 flex items-center gap-1">
+              <p className="text-xs text-gray-400 font-semibold uppercase tracking-wider px-0.5 mb-2 flex items-center gap-1">
                 <span className="text-gray-400">{cfg?.icon}</span>
                 {cfg?.label ?? category}
               </p>
-              <div className="grid grid-cols-4 gap-1.5">
+              <div className="grid grid-cols-3 gap-2">
                 {catProducts.map((product) => (
                   <div
                     key={product.id}
-                    className="p-2 rounded-md bg-white border border-gray-200 hover:border-emerald-300 hover:bg-emerald-50/30 transition-colors cursor-default"
+                    className="p-3 rounded-lg bg-white border border-gray-200 hover:border-emerald-300 hover:bg-emerald-50/30 transition-colors cursor-default min-h-[56px] flex flex-col justify-between"
                   >
-                    <p className="text-xs text-gray-800 truncate leading-tight mb-0.5">{product.name}</p>
-                    <p className="text-xs font-bold text-emerald-600">{formatEUR(product.price)}</p>
+                    <p className="text-sm text-gray-800 leading-tight mb-1 line-clamp-2">{product.name}</p>
+                    <p className="text-sm font-bold text-emerald-600">{formatEUR(product.price)}</p>
                   </div>
                 ))}
               </div>
