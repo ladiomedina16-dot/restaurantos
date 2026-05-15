@@ -21,6 +21,8 @@ import {
   Users,
   MapPin,
   X,
+  Calendar,
+  CalendarX,
 } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -113,7 +115,8 @@ export function OrdersTab({ overrideRestaurantId }: { overrideRestaurantId?: str
   const { authHeaders, handleFetchResponse, currentUser } = useAuth()
   const [orders, setOrders] = useState<Order[]>([])
   const [loading, setLoading] = useState(true)
-  const [statusFilter, setStatusFilter] = useState<string>('')
+  const [statusFilter, setStatusFilter] = useState<string>('pending')
+  const [dateFilter, setDateFilter] = useState<string>('')
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null)
   const [showDetailDialog, setShowDetailDialog] = useState(false)
   const [updatingStatus, setUpdatingStatus] = useState<string | null>(null)
@@ -179,7 +182,6 @@ export function OrdersTab({ overrideRestaurantId }: { overrideRestaurantId?: str
   }
 
   const statusFilters = [
-    { value: '', label: 'Todos' },
     { value: 'pending', label: 'Pendientes' },
     { value: 'in_progress', label: 'En preparación' },
     { value: 'ready', label: 'Listos' },
@@ -199,36 +201,62 @@ export function OrdersTab({ overrideRestaurantId }: { overrideRestaurantId?: str
     }
   }
 
-  // ─── Search filtering for paid orders ────────────────────────
+  // ─── Search & date filtering for paid orders ────────────────────
   const isPaidView = statusFilter === 'paid'
 
+  // Helper: format a date string "YYYY-MM-DD" as "DD/MM/YYYY"
+  function formatDateFilterLabel(dateStr: string): string {
+    const [yyyy, mm, dd] = dateStr.split('-')
+    return `${dd}/${mm}/${yyyy}`
+  }
+
   const filteredOrders = useMemo(() => {
-    if (!isPaidView || !searchQuery.trim()) return orders
-    const q = searchQuery.trim().toLowerCase()
-    return orders.filter((order) => {
-      const ticket = ticketNumber(order.id).toLowerCase()
-      const mesa = `m${order.table?.number ?? ''}`
-      const total = formatEUR(order.total).toLowerCase()
-      const date = new Date(order.updatedAt).toLocaleDateString('es-ES').toLowerCase()
-      const time = new Date(order.updatedAt).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' }).toLowerCase()
-      const zone = zoneConfig[order.table?.zone]?.label?.toLowerCase() ?? ''
-      const cashier = order.payments?.[0]?.user?.name?.toLowerCase() ?? order.payments?.[0]?.user?.username?.toLowerCase() ?? ''
-      return (
-        ticket.includes(q) ||
-        mesa.includes(q) ||
-        total.includes(q) ||
-        date.includes(q) ||
-        time.includes(q) ||
-        zone.includes(q) ||
-        cashier.includes(q)
-      )
-    })
-  }, [orders, isPaidView, searchQuery])
+    if (!isPaidView) return orders
+    let result = orders
+
+    // Date filter
+    if (dateFilter) {
+      result = result.filter((order) => {
+        const orderDate = new Date(order.updatedAt)
+        const y = orderDate.getFullYear()
+        const m = String(orderDate.getMonth() + 1).padStart(2, '0')
+        const d = String(orderDate.getDate()).padStart(2, '0')
+        return `${y}-${m}-${d}` === dateFilter
+      })
+    }
+
+    // Text search filter
+    if (searchQuery.trim()) {
+      const q = searchQuery.trim().toLowerCase()
+      result = result.filter((order) => {
+        const ticket = ticketNumber(order.id).toLowerCase()
+        const mesa = `m${order.table?.number ?? ''}`
+        const total = formatEUR(order.total).toLowerCase()
+        const date = new Date(order.updatedAt).toLocaleDateString('es-ES').toLowerCase()
+        const time = new Date(order.updatedAt).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' }).toLowerCase()
+        const zone = zoneConfig[order.table?.zone]?.label?.toLowerCase() ?? ''
+        const cashier = order.payments?.[0]?.user?.name?.toLowerCase() ?? order.payments?.[0]?.user?.username?.toLowerCase() ?? ''
+        return (
+          ticket.includes(q) ||
+          mesa.includes(q) ||
+          total.includes(q) ||
+          date.includes(q) ||
+          time.includes(q) ||
+          zone.includes(q) ||
+          cashier.includes(q)
+        )
+      })
+    }
+
+    return result
+  }, [orders, isPaidView, searchQuery, dateFilter])
 
   const groupedOrders = useMemo(() => {
     if (!isPaidView) return null
+    // When a specific date is selected, skip grouping — show flat list under one header
+    if (dateFilter) return null
     return groupOrdersByDate(filteredOrders)
-  }, [filteredOrders, isPaidView])
+  }, [filteredOrders, isPaidView, dateFilter])
 
   if (loading) {
     return (
@@ -262,49 +290,190 @@ export function OrdersTab({ overrideRestaurantId }: { overrideRestaurantId?: str
               variant={statusFilter === filter.value ? 'default' : 'outline'}
               size="sm"
               className={`h-8 shrink-0 text-xs ${statusFilter === filter.value ? 'bg-amber-600 hover:bg-amber-700 text-white' : ''}`}
-              onClick={() => { setStatusFilter(filter.value); setLoading(true); setSearchQuery('') }}
+              onClick={() => { setStatusFilter(filter.value); setLoading(true); setSearchQuery(''); setDateFilter('') }}
             >
               {filter.label}
             </Button>
           ))}
         </div>
 
-        {/* Search bar */}
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            placeholder="Buscar por Ticket #, mesa, total, fecha, cajero..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="pl-9 h-11 pr-9"
-          />
-          {searchQuery && (
-            <button
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-              onClick={() => setSearchQuery('')}
-            >
-              <X className="size-4" />
-            </button>
-          )}
+        {/* Search bar + Date filter */}
+        <div className="flex flex-col sm:flex-row gap-2">
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              placeholder="Buscar por Ticket #, mesa, total, fecha, cajero..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="pl-9 h-11 pr-9"
+            />
+            {searchQuery && (
+              <button
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                onClick={() => setSearchQuery('')}
+              >
+                <X className="size-4" />
+              </button>
+            )}
+          </div>
+          <div className="flex items-center gap-1.5">
+            <div className="relative">
+              <Calendar className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+              <Input
+                type="date"
+                value={dateFilter}
+                onChange={(e) => setDateFilter(e.target.value)}
+                className="h-11 pl-9 pr-3 w-[180px]"
+              />
+            </div>
+            {dateFilter && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-11 px-2 text-muted-foreground hover:text-foreground"
+                onClick={() => setDateFilter('')}
+                title="Limpiar fecha"
+              >
+                <CalendarX className="size-4" />
+              </Button>
+            )}
+          </div>
         </div>
 
         {/* Results count */}
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
           <Receipt className="size-4" />
-          <span>{filteredOrders.length} pedido{filteredOrders.length !== 1 ? 's' : ''} pagado{filteredOrders.length !== 1 ? 's' : ''}</span>
+          {dateFilter ? (
+            <span>{filteredOrders.length} ticket{filteredOrders.length !== 1 ? 's' : ''} encontrado{filteredOrders.length !== 1 ? 's' : ''} para {formatDateFilterLabel(dateFilter)}</span>
+          ) : (
+            <span>{filteredOrders.length} pedido{filteredOrders.length !== 1 ? 's' : ''} pagado{filteredOrders.length !== 1 ? 's' : ''}</span>
+          )}
           {searchQuery && <span className="text-amber-600">— filtrando por &quot;{searchQuery}&quot;</span>}
         </div>
 
-        {/* Grouped orders by date */}
+        {/* Orders list */}
         {filteredOrders.length === 0 ? (
           <Card className="rounded-xl">
             <CardContent className="p-6 text-center text-muted-foreground">
               <Receipt className="size-12 mx-auto mb-3 opacity-30" />
-              <p>No hay pedidos pagados</p>
+              {dateFilter ? (
+                <p>No hay tickets pagados para {formatDateFilterLabel(dateFilter)}</p>
+              ) : (
+                <p>No hay pedidos pagados</p>
+              )}
               {searchQuery && <p className="text-xs mt-1">Prueba con otro término de búsqueda</p>}
             </CardContent>
           </Card>
+        ) : dateFilter ? (
+          /* Single-date view: header + flat grid */
+          <div>
+            <div className="flex items-center gap-2 mb-3 sticky top-0 bg-background z-10 py-1">
+              <div className="h-px flex-1 bg-border" />
+              <span className="text-sm font-semibold text-muted-foreground uppercase tracking-wider px-3">
+                Tickets del {formatDateFilterLabel(dateFilter)}
+              </span>
+              <Badge variant="outline" className="text-[10px]">{filteredOrders.length}</Badge>
+              <div className="h-px flex-1 bg-border" />
+            </div>
+            <div className="grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+              {filteredOrders.map((order) => {
+                const payment = order.payments?.[0]
+                const paymentMethods = order.payments?.map((p) => p.method) ?? []
+                const uniqueMethods = [...new Set(paymentMethods)]
+                const cashier = payment?.user?.name || payment?.user?.username
+
+                return (
+                  <Card
+                    key={order.id}
+                    className="rounded-xl cursor-pointer hover:bg-amber-50/50 transition-colors border-l-4 border-l-emerald-400"
+                    onClick={() => { setSelectedOrder(order); setShowDetailDialog(true) }}
+                  >
+                    <CardContent className="p-3 space-y-2">
+                      {/* Header: Ticket # + Badge */}
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-1.5">
+                          <Receipt className="size-3.5 text-emerald-600" />
+                          <span className="font-mono font-bold text-sm text-emerald-700">
+                            Ticket {ticketNumber(order.id)}
+                          </span>
+                        </div>
+                        <Badge className="bg-emerald-100 text-emerald-800 text-[10px] px-1.5 py-0">
+                          Pagado
+                        </Badge>
+                      </div>
+
+                      {/* Info grid */}
+                      <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
+                        <div className="flex items-center gap-1 text-muted-foreground">
+                          <MapPin className="size-3" />
+                          <span>Mesa {order.table?.number ?? '?'}</span>
+                        </div>
+                        <div className="flex items-center gap-1 text-muted-foreground">
+                          <Users className="size-3" />
+                          <span>{zoneConfig[order.table?.zone]?.label ?? order.table?.zone}</span>
+                        </div>
+                        <div className="flex items-center gap-1 text-muted-foreground">
+                          <Clock className="size-3" />
+                          <span>{formatTime(order.updatedAt)}</span>
+                        </div>
+                        <div className="flex items-center gap-1 text-muted-foreground">
+                          <span>{order.items.length} item{order.items.length !== 1 ? 's' : ''}</span>
+                        </div>
+                      </div>
+
+                      {/* Payment methods + cashier */}
+                      <div className="flex items-center justify-between">
+                        <div className="flex gap-1 flex-wrap">
+                          {uniqueMethods.map((m) => (
+                            <PaymentMethodBadge key={m} method={m} />
+                          ))}
+                        </div>
+                        {cashier && (
+                          <span className="text-[10px] text-muted-foreground truncate max-w-[80px]" title={`Cajero: ${cashier}`}>
+                            {cashier}
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Total */}
+                      <div className="flex items-center justify-between pt-1 border-t">
+                        <span className="text-xs text-muted-foreground">Total</span>
+                        <span className="font-bold text-emerald-700">{formatEUR(order.total)}</span>
+                      </div>
+
+                      {/* Reprint buttons */}
+                      {canPrint && (
+                        <div className="flex gap-1.5 pt-1">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-7 text-[10px] flex-1"
+                            disabled={reprinting === order.id}
+                            onClick={(e) => handleReprint(e, order, 'ticket')}
+                          >
+                            <Printer className="size-3 mr-1" />
+                            {reprinting === order.id ? '...' : 'Reimprimir'}
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-7 text-[10px] flex-1"
+                            disabled={reprinting === order.id}
+                            onClick={(e) => handleReprint(e, order, 'factura')}
+                          >
+                            <FileText className="size-3 mr-1" />
+                            Factura
+                          </Button>
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                )
+              })}
+            </div>
+          </div>
         ) : (
+          /* No date filter: grouped by date (Hoy / Ayer / DD/MM/YYYY) */
           groupedOrders?.map((group) => (
             <div key={group.key}>
               {/* Date header */}
@@ -316,9 +485,7 @@ export function OrdersTab({ overrideRestaurantId }: { overrideRestaurantId?: str
                 <Badge variant="outline" className="text-[10px]">{group.orders.length}</Badge>
                 <div className="h-px flex-1 bg-border" />
               </div>
-
-              {/* Cards grid */}
-              <div className="grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 mb-2">
+              <div className="grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
                 {group.orders.map((order) => {
                   const payment = order.payments?.[0]
                   const paymentMethods = order.payments?.map((p) => p.method) ?? []
@@ -614,7 +781,7 @@ export function OrdersTab({ overrideRestaurantId }: { overrideRestaurantId?: str
             variant={statusFilter === filter.value ? 'default' : 'outline'}
             size="sm"
             className={`h-8 shrink-0 text-xs ${statusFilter === filter.value ? 'bg-amber-600 hover:bg-amber-700 text-white' : ''}`}
-            onClick={() => { setStatusFilter(filter.value); setLoading(true) }}
+            onClick={() => { setStatusFilter(filter.value); setLoading(true); setDateFilter(''); setSearchQuery('') }}
           >
             {filter.label}
           </Button>
