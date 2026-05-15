@@ -23,26 +23,26 @@ export function CashSummaryPanel({
   supplierPayments,
   onAddSupplier,
 }: CashSummaryPanelProps) {
+  /* ── Closed state ── */
   if (!cashSession) {
     return (
-      <div className="bg-red-950/30 rounded-xl border border-red-700/40 p-4">
+      <div className="bg-red-50 border border-red-200 rounded-lg p-4 shrink-0">
         <div className="flex items-center gap-2 mb-3">
-          <Lock className="size-5 text-red-400" />
-          <h4 className="text-sm font-bold text-red-300">Caja Cerrada</h4>
+          <Lock className="size-4 text-red-500" />
+          <h4 className="text-sm font-bold text-red-700">Caja Cerrada</h4>
         </div>
-        <p className="text-xs text-slate-400 mb-3">Debes abrir caja para poder cobrar</p>
         <Button
-          className="w-full h-11 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-lg"
+          className="w-full h-9 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-lg"
           onClick={onOpenCash}
         >
-          <CheckCircle className="size-4 mr-2" />
+          <CheckCircle className="size-4 mr-1.5" />
           Abrir Caja
         </Button>
       </div>
     )
   }
 
-  // Calculate cash summary from session data
+  /* ── Calculations ── */
   const openingCash = cashSession.openingCash ?? 0
   const totalCash = cashSession.totalCash ?? 0
   const totalCard = cashSession.totalCard ?? 0
@@ -50,73 +50,74 @@ export function CashSummaryPanel({
   const expectedCash = openingCash + totalCash - totalSuppliers
   const totalSales = totalCash + totalCard
 
+  /* ── Open state ── */
   return (
-    <div className="bg-slate-900/90 rounded-xl border border-slate-700/50 shadow-lg overflow-hidden">
-      {/* Session Status */}
-      <div className="flex items-center justify-between px-3 py-2.5 border-b border-slate-700/40">
-        <div className="flex items-center gap-2">
-          <CheckCircle className="size-4 text-emerald-400" />
-          <span className="text-xs font-bold text-emerald-300 uppercase tracking-wider">Caja Abierta</span>
+    <div className="bg-white border border-gray-200 rounded-lg overflow-hidden shrink-0">
+      {/* Status bar */}
+      <div className="flex items-center justify-between px-3 py-2 border-b border-gray-100">
+        <div className="flex items-center gap-1.5">
+          <CheckCircle className="size-3.5 text-emerald-600" />
+          <span className="text-xs font-semibold text-emerald-600">Caja Abierta</span>
         </div>
-        <Button
-          variant="ghost"
-          size="sm"
-          className="h-7 text-[10px] text-red-400 hover:text-red-300 hover:bg-red-900/20 border border-red-700/30 px-2"
+        <button
+          type="button"
+          className="text-[10px] font-semibold text-red-500 hover:text-red-700 hover:underline transition-colors"
           onClick={onCloseCash}
         >
-          Cerrar Caja
-        </Button>
+          Cerrar
+        </button>
       </div>
 
-      {/* Cash Info Grid */}
-      <div className="p-3 space-y-1.5">
+      {/* Cash Info */}
+      <div className="px-3 py-2 space-y-1">
         <div className="flex items-center justify-between">
-          <span className="text-xs text-slate-400 flex items-center gap-1.5">
+          <span className="text-[11px] text-gray-500 flex items-center gap-1">
             <Wallet className="size-3" /> Apertura
           </span>
-          <span className="text-xs font-semibold text-white">{formatEUR(openingCash)}</span>
+          <span className="text-[11px] font-semibold text-gray-800">{formatEUR(openingCash)}</span>
         </div>
         <div className="flex items-center justify-between">
-          <span className="text-xs text-slate-400 flex items-center gap-1.5">
+          <span className="text-[11px] text-gray-500 flex items-center gap-1">
             <Banknote className="size-3" /> Efectivo
           </span>
-          <span className="text-xs font-semibold text-emerald-400">{formatEUR(totalCash)}</span>
+          <span className="text-[11px] font-semibold text-emerald-600">{formatEUR(totalCash)}</span>
         </div>
         <div className="flex items-center justify-between">
-          <span className="text-xs text-slate-400 flex items-center gap-1.5">
+          <span className="text-[11px] text-gray-500 flex items-center gap-1">
             <CreditCard className="size-3" /> Tarjeta
           </span>
-          <span className="text-xs font-semibold text-sky-400">{formatEUR(totalCard)}</span>
-        </div>
-        <Separator className="bg-slate-700/40" />
-        <div className="flex items-center justify-between">
-          <span className="text-xs text-slate-300 font-medium flex items-center gap-1.5">
-            <TrendingUp className="size-3" /> Total Ventas
-          </span>
-          <span className="text-sm font-bold text-amber-400">{formatEUR(totalSales)}</span>
-        </div>
-        <div className="flex items-center justify-between">
-          <span className="text-xs text-slate-400 flex items-center gap-1.5">
-            <Wallet className="size-3" /> Esperado en caja
-          </span>
-          <span className="text-xs font-semibold text-white">{formatEUR(expectedCash)}</span>
+          <span className="text-[11px] font-semibold text-blue-600">{formatEUR(totalCard)}</span>
         </div>
 
-        {/* Opened by / time */}
-        <div className="text-[10px] text-slate-500 pt-1">
-          {cashSession.openedAt && `Abierta: ${formatTime(cashSession.openedAt)}`}
-          {cashSession.openedBy && ` · Por: ${cashSession.openedBy.name ?? cashSession.openedBy.username ?? ''}`}
+        <Separator className="bg-gray-200" />
+
+        <div className="flex items-center justify-between">
+          <span className="text-[11px] text-gray-700 font-medium flex items-center gap-1">
+            <TrendingUp className="size-3" /> Ventas
+          </span>
+          <span className="text-xs font-bold text-emerald-600">{formatEUR(totalSales)}</span>
         </div>
+        <div className="flex items-center justify-between">
+          <span className="text-[11px] text-gray-500">Esperado</span>
+          <span className="text-[11px] font-semibold text-gray-800">{formatEUR(expectedCash)}</span>
+        </div>
+
+        {cashSession.openedAt && (
+          <p className="text-gray-400 text-xs">
+            {formatTime(cashSession.openedAt)}
+            {cashSession.openedBy && ` · ${cashSession.openedBy.name ?? cashSession.openedBy.username ?? ''}`}
+          </p>
+        )}
       </div>
 
       {/* Supplier Payments */}
-      <div className="border-t border-slate-700/40 px-3 py-2.5">
-        <div className="flex items-center justify-between mb-2">
+      <div className="border-t border-gray-100 px-3 py-2">
+        <div className="flex items-center justify-between mb-1">
           <div className="flex items-center gap-1.5">
-            <Flame className="size-3.5 text-orange-400" />
-            <span className="text-xs font-semibold text-slate-300">Proveedores</span>
+            <Flame className="size-3.5 text-orange-500" />
+            <span className="text-[11px] font-medium text-gray-700">Prov.</span>
             {supplierPayments.length > 0 && (
-              <Badge variant="outline" className="text-[9px] bg-orange-900/20 text-orange-300 border-orange-600/30 px-1 py-0">
+              <Badge variant="outline" className="text-[9px] bg-orange-50 text-orange-600 border-orange-200 px-1 py-0 h-4">
                 {supplierPayments.length} · {formatEUR(totalSuppliers)}
               </Badge>
             )}
@@ -124,28 +125,24 @@ export function CashSummaryPanel({
           <Button
             variant="ghost"
             size="sm"
-            className="h-6 text-[10px] bg-orange-900/20 text-orange-300 hover:bg-orange-900/30 border border-orange-600/30 px-2"
+            className="h-6 text-[10px] bg-orange-50 text-orange-600 hover:bg-orange-100 border border-orange-200 px-2 rounded"
             onClick={onAddSupplier}
           >
-            <Plus className="size-3 mr-0.5" />
-            Añadir
+            <Plus className="size-3" />
           </Button>
         </div>
-        {supplierPayments.length > 0 ? (
-          <ScrollArea className="max-h-20">
-            <div className="space-y-1">
+
+        {supplierPayments.length > 0 && (
+          <ScrollArea className="max-h-16">
+            <div className="space-y-0.5">
               {supplierPayments.map((sp) => (
-                <div key={sp.id} className="flex items-center justify-between text-[10px] py-0.5">
-                  <span className="text-slate-400 truncate mr-2">
-                    {sp.concept} · {sp.user?.name || sp.user?.username || '—'}
-                  </span>
-                  <span className="text-orange-400 font-medium shrink-0">-{formatEUR(sp.amount)}</span>
+                <div key={sp.id} className="flex items-center justify-between text-[10px]">
+                  <span className="text-gray-500 truncate mr-2">{sp.concept}</span>
+                  <span className="text-orange-600 font-medium shrink-0">-{formatEUR(sp.amount)}</span>
                 </div>
               ))}
             </div>
           </ScrollArea>
-        ) : (
-          <p className="text-[10px] text-slate-600">Sin pagos a proveedores</p>
         )}
       </div>
     </div>

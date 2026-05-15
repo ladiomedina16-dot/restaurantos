@@ -5,8 +5,8 @@ import { Button } from '@/components/ui/button'
 import { Delete, CornerDownLeft } from 'lucide-react'
 
 /**
- * POS Touch Calculator — frontend-only, no backend interaction.
- * Provides basic arithmetic operations optimized for 15"-22" touch screens.
+ * Compact POS Touch Calculator — frontend-only, no backend interaction.
+ * Light-themed to match the POS redesign.
  */
 export function Calculator() {
   const [display, setDisplay] = useState('0')
@@ -58,13 +58,11 @@ export function Calculator() {
 
   const performOperation = (nextOperator: string) => {
     const inputValue = parseFloat(display)
-
     if (prevValue === null) {
       setPrevValue(inputValue)
     } else if (operator) {
       const currentValue = prevValue
       let result: number
-
       switch (operator) {
         case '+': result = currentValue + inputValue; break
         case '-': result = currentValue - inputValue; break
@@ -72,12 +70,10 @@ export function Calculator() {
         case '÷': result = inputValue !== 0 ? currentValue / inputValue : 0; break
         default: result = inputValue
       }
-
       const rounded = Math.round(result * 100) / 100
       setPrevValue(rounded)
       setDisplay(String(rounded))
     }
-
     setWaitingForOperand(true)
     setOperator(nextOperator)
     setJustCalculated(false)
@@ -85,10 +81,8 @@ export function Calculator() {
 
   const handleEquals = () => {
     if (operator === null || prevValue === null) return
-
     const inputValue = parseFloat(display)
     let result: number
-
     switch (operator) {
       case '+': result = prevValue + inputValue; break
       case '-': result = prevValue - inputValue; break
@@ -96,7 +90,6 @@ export function Calculator() {
       case '÷': result = inputValue !== 0 ? prevValue / inputValue : 0; break
       default: result = inputValue
     }
-
     const rounded = Math.round(result * 100) / 100
     setDisplay(String(rounded))
     setPrevValue(null)
@@ -106,40 +99,36 @@ export function Calculator() {
   }
 
   const calcButtons = [
-    { label: 'C', action: clear, className: 'bg-red-900/40 hover:bg-red-900/60 text-red-200' },
-    { label: '⌫', action: backspace, className: 'bg-slate-700/60 hover:bg-slate-600/60 text-slate-200', icon: <Delete className="size-5" /> },
-    { label: '÷', action: () => performOperation('÷'), className: `bg-amber-700/40 hover:bg-amber-700/60 text-amber-200 ${operator === '÷' && waitingForOperand ? 'ring-2 ring-amber-400' : ''}` },
-    { label: '7', action: () => inputDigit('7'), className: 'bg-slate-800/60 hover:bg-slate-700/60 text-white' },
-    { label: '8', action: () => inputDigit('8'), className: 'bg-slate-800/60 hover:bg-slate-700/60 text-white' },
-    { label: '9', action: () => inputDigit('9'), className: 'bg-slate-800/60 hover:bg-slate-700/60 text-white' },
-    { label: '×', action: () => performOperation('×'), className: `bg-amber-700/40 hover:bg-amber-700/60 text-amber-200 ${operator === '×' && waitingForOperand ? 'ring-2 ring-amber-400' : ''}` },
-    { label: '4', action: () => inputDigit('4'), className: 'bg-slate-800/60 hover:bg-slate-700/60 text-white' },
-    { label: '5', action: () => inputDigit('5'), className: 'bg-slate-800/60 hover:bg-slate-700/60 text-white' },
-    { label: '6', action: () => inputDigit('6'), className: 'bg-slate-800/60 hover:bg-slate-700/60 text-white' },
-    { label: '-', action: () => performOperation('-'), className: `bg-amber-700/40 hover:bg-amber-700/60 text-amber-200 ${operator === '-' && waitingForOperand ? 'ring-2 ring-amber-400' : ''}` },
-    { label: '1', action: () => inputDigit('1'), className: 'bg-slate-800/60 hover:bg-slate-700/60 text-white' },
-    { label: '2', action: () => inputDigit('2'), className: 'bg-slate-800/60 hover:bg-slate-700/60 text-white' },
-    { label: '3', action: () => inputDigit('3'), className: 'bg-slate-800/60 hover:bg-slate-700/60 text-white' },
-    { label: '+', action: () => performOperation('+'), className: `bg-amber-700/40 hover:bg-amber-700/60 text-amber-200 ${operator === '+' && waitingForOperand ? 'ring-2 ring-amber-400' : ''}` },
-    { label: '0', action: () => inputDigit('0'), className: 'bg-slate-800/60 hover:bg-slate-700/60 text-white col-span-2' },
-    { label: '.', action: inputDecimal, className: 'bg-slate-800/60 hover:bg-slate-700/60 text-white' },
-    { label: '=', action: handleEquals, className: 'bg-emerald-700/50 hover:bg-emerald-700/70 text-emerald-100', icon: <CornerDownLeft className="size-4" /> },
+    { label: 'C', action: clear, cls: 'bg-red-100 hover:bg-red-200 text-red-700' },
+    { label: '⌫', action: backspace, cls: 'bg-gray-100 hover:bg-gray-200 text-gray-700', icon: <Delete className="size-3.5" /> },
+    { label: '÷', action: () => performOperation('÷'), cls: `bg-amber-100 hover:bg-amber-200 text-amber-700 ${operator === '÷' && waitingForOperand ? 'ring-2 ring-amber-400' : ''}` },
+    { label: '7', action: () => inputDigit('7'), cls: 'bg-white hover:bg-gray-50 text-gray-800 border border-gray-200' },
+    { label: '8', action: () => inputDigit('8'), cls: 'bg-white hover:bg-gray-50 text-gray-800 border border-gray-200' },
+    { label: '9', action: () => inputDigit('9'), cls: 'bg-white hover:bg-gray-50 text-gray-800 border border-gray-200' },
+    { label: '×', action: () => performOperation('×'), cls: `bg-amber-100 hover:bg-amber-200 text-amber-700 ${operator === '×' && waitingForOperand ? 'ring-2 ring-amber-400' : ''}` },
+    { label: '4', action: () => inputDigit('4'), cls: 'bg-white hover:bg-gray-50 text-gray-800 border border-gray-200' },
+    { label: '5', action: () => inputDigit('5'), cls: 'bg-white hover:bg-gray-50 text-gray-800 border border-gray-200' },
+    { label: '6', action: () => inputDigit('6'), cls: 'bg-white hover:bg-gray-50 text-gray-800 border border-gray-200' },
+    { label: '-', action: () => performOperation('-'), cls: `bg-amber-100 hover:bg-amber-200 text-amber-700 ${operator === '-' && waitingForOperand ? 'ring-2 ring-amber-400' : ''}` },
+    { label: '1', action: () => inputDigit('1'), cls: 'bg-white hover:bg-gray-50 text-gray-800 border border-gray-200' },
+    { label: '2', action: () => inputDigit('2'), cls: 'bg-white hover:bg-gray-50 text-gray-800 border border-gray-200' },
+    { label: '3', action: () => inputDigit('3'), cls: 'bg-white hover:bg-gray-50 text-gray-800 border border-gray-200' },
+    { label: '+', action: () => performOperation('+'), cls: `bg-amber-100 hover:bg-amber-200 text-amber-700 ${operator === '+' && waitingForOperand ? 'ring-2 ring-amber-400' : ''}` },
+    { label: '0', action: () => inputDigit('0'), cls: 'bg-white hover:bg-gray-50 text-gray-800 border border-gray-200 col-span-2' },
+    { label: '.', action: inputDecimal, cls: 'bg-white hover:bg-gray-50 text-gray-800 border border-gray-200' },
+    { label: '=', action: handleEquals, cls: 'bg-emerald-100 hover:bg-emerald-200 text-emerald-700', icon: <CornerDownLeft className="size-3.5" /> },
   ]
 
   return (
-    <div className="bg-slate-900/80 rounded-xl border border-slate-700/50 p-3 shadow-lg">
+    <div className="bg-white rounded-lg p-3 shrink-0">
       {/* Display */}
-      <div className="bg-slate-950 rounded-lg px-4 py-3 mb-3 border border-slate-700/30">
-        <div className="flex items-center justify-between">
-          {operator && prevValue !== null && (
-            <span className="text-slate-500 text-sm mr-2">
-              {prevValue} {operator}
-            </span>
-          )}
-          <span className="text-2xl font-mono font-bold text-emerald-400 ml-auto tracking-tight">
-            {display}
-          </span>
-        </div>
+      <div className="bg-gray-50 rounded px-3 py-2 mb-3 border border-gray-200 flex items-center justify-between min-h-[40px]">
+        {operator && prevValue !== null && (
+          <span className="text-gray-400 text-xs mr-2">{prevValue} {operator}</span>
+        )}
+        <span className="text-xl font-mono font-bold text-emerald-600 ml-auto tracking-tight">
+          {display}
+        </span>
       </div>
 
       {/* Button Grid */}
@@ -148,7 +137,7 @@ export function Calculator() {
           <Button
             key={i}
             variant="ghost"
-            className={`h-12 text-lg font-semibold rounded-lg transition-all active:scale-95 ${btn.className}`}
+            className={`h-10 text-sm font-semibold rounded-lg transition-all active:scale-95 ${btn.cls}`}
             onClick={btn.action}
           >
             {btn.icon ?? btn.label}

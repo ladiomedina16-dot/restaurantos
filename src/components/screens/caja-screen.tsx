@@ -5,7 +5,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { useAuth } from '@/components/common/auth-context'
 import { toast } from 'sonner'
 import type { TableItem, Order, SupplierPaymentItem } from '@/types/restaurant'
-import { formatEUR } from '@/lib/formatters'
+import { formatEUR, formatTime } from '@/lib/formatters'
 
 // ─── Sub-components ──────────────────────────────────────────────────────────
 import { TablesPanel } from '@/components/caja/tables-panel'
@@ -15,11 +15,15 @@ import { QuickProductsPanel } from '@/components/caja/quick-products-panel'
 import { CashSummaryPanel } from '@/components/caja/cash-summary-panel'
 import { CashSessionDialogs } from '@/components/caja/cash-session-dialogs'
 import { Calculator } from '@/components/caja/calculator'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
+import { Store, Clock, User, LogOut, Unlock } from 'lucide-react'
 
-// ─── CAJA TAB — POS Modern Layout ────────────────────────────────────────────
+// ─── CAJA TAB — Light-themed POS Layout ─────────────────────────────────────
 
 export function CajaTab() {
-  // ─── Core State ────────────────────────────────────────────────
+  // ─── Core State (PRESERVED) ────────────────────────────────
   const [tables, setTables] = useState<TableItem[]>([])
   const [orders, setOrders] = useState<Order[]>([])
   const [loading, setLoading] = useState(true)
@@ -29,11 +33,11 @@ export function CajaTab() {
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<PaymentMethod>('efectivo')
   const { authHeaders, handleFetchResponse } = useAuth()
 
-  // ─── Mixto Payment State ───────────────────────────────────────
+  // ─── Mixto Payment State (PRESERVED) ───────────────────────
   const [mixtoEfectivo, setMixtoEfectivo] = useState('')
   const [mixtoTarjeta, setMixtoTarjeta] = useState('')
 
-  // ─── Cash Session State ────────────────────────────────────────
+  // ─── Cash Session State (PRESERVED) ────────────────────────
   const [cashSession, setCashSession] = useState<any>(null)
   const [showOpenCashDialog, setShowOpenCashDialog] = useState(false)
   const [showCloseCashDialog, setShowCloseCashDialog] = useState(false)
@@ -48,10 +52,13 @@ export function CajaTab() {
   const [supplierAmount, setSupplierAmount] = useState('')
   const [addingSupplier, setAddingSupplier] = useState(false)
 
-  // ─── History Dialog State (future expansion) ───────────────────
+  // ─── History Dialog State (PRESERVED) ──────────────────────
   const [showHistory, setShowHistory] = useState(false)
 
-  // ─── Fetch Callbacks (PRESERVED EXACTLY) ──────────────────────
+  // ─── Calculator Dialog State (PRESERVED) ───────────────────
+  const [showCalculator, setShowCalculator] = useState(false)
+
+  // ─── Fetch Callbacks (PRESERVED EXACTLY) ───────────────────
   const fetchTables = useCallback(async () => {
     try {
       const res = await fetch('/api/tables', { headers: authHeaders(false) })
@@ -101,7 +108,7 @@ export function CajaTab() {
     } catch { /* silently fail */ }
   }, [authHeaders, handleFetchResponse, cashSession])
 
-  // ─── Effects (PRESERVED) ───────────────────────────────────────
+  // ─── Effects (PRESERVED) ───────────────────────────────────
   useEffect(() => {
     const load = async () => {
       await Promise.all([fetchTables(), fetchActiveOrders(), fetchCashSession()])
@@ -121,7 +128,7 @@ export function CajaTab() {
     fetchSupplierPayments()
   }, [fetchSupplierPayments])
 
-  // ─── Business Logic (PRESERVED EXACTLY) ───────────────────────
+  // ─── Business Logic (PRESERVED EXACTLY) ────────────────────
   const getTableOrders = (tableId: string) =>
     orders.filter((o) => o.tableId === tableId && !['paid', 'cancelled'].includes(o.status))
 
@@ -208,7 +215,7 @@ export function CajaTab() {
     }
   }
 
-  // ─── Dialog Handlers (PRESERVED) ──────────────────────────────
+  // ─── Dialog Handlers (PRESERVED) ───────────────────────────
   const handleOpenCash = async () => {
     setCashSessionLoading(true)
     try {
@@ -295,26 +302,74 @@ export function CajaTab() {
     }
   }
 
-  // ─── Loading State ─────────────────────────────────────────────
+  // ─── Loading State ─────────────────────────────────────────
   if (loading) {
     return (
-      <div className="h-[calc(100vh-120px)] bg-slate-950 rounded-xl p-4">
-        <div className="grid grid-cols-3 gap-3 h-full">
-          <Skeleton className="rounded-xl bg-slate-800/50" />
-          <Skeleton className="rounded-xl bg-slate-800/50" />
-          <Skeleton className="rounded-xl bg-slate-800/50" />
+      <div className="h-[calc(100vh-8rem)] bg-gray-100 rounded-lg p-4">
+        <div className="grid grid-cols-[280px_1fr_340px] gap-2 h-full">
+          <Skeleton className="rounded-lg" />
+          <Skeleton className="rounded-lg" />
+          <Skeleton className="rounded-lg" />
         </div>
       </div>
     )
   }
 
-  // ─── POS Layout ────────────────────────────────────────────────
+  // ─── Light-themed POS Layout ───────────────────────────────
   return (
-    <div className="h-[calc(100vh-120px)] flex flex-col gap-3">
-      {/* 3-Column Main Area */}
-      <div className="flex-1 grid grid-cols-12 gap-3 min-h-0">
-        {/* LEFT COLUMN — Occupied Tables */}
-        <div className="col-span-3 min-h-0">
+    <div className="h-[calc(100vh-8rem)] flex flex-col bg-gray-100 rounded-lg overflow-hidden">
+      {/* ─── Header Bar ─────────────────────────────────────── */}
+      <header className="bg-slate-800 text-white px-4 py-2.5 flex items-center justify-between shrink-0 rounded-t-lg">
+        <div className="flex items-center gap-2">
+          <Store className="size-5" />
+          <h1 className="text-sm font-bold tracking-wide">RESTAURANTE — PUNTO DE VENTA</h1>
+        </div>
+        <div className="flex items-center gap-4 text-xs">
+          {cashSession ? (
+            <>
+              <Badge className="bg-emerald-600 text-white text-[10px] hover:bg-emerald-600 border-0">
+                Caja Abierta
+              </Badge>
+              <span className="text-slate-300 flex items-center gap-1">
+                <Clock className="size-3" />
+                {formatTime(cashSession.openedAt)}
+              </span>
+            </>
+          ) : (
+            <Badge variant="destructive" className="text-[10px]">
+              Caja Cerrada
+            </Badge>
+          )}
+          <span className="text-slate-300 flex items-center gap-1">
+            <User className="size-3" />
+            Cajero
+          </span>
+          {cashSession ? (
+            <Button
+              size="sm"
+              className="bg-red-600 hover:bg-red-700 text-white text-xs h-7"
+              onClick={() => setShowCloseCashDialog(true)}
+            >
+              <LogOut className="size-3 mr-1" />
+              CERRAR CAJA
+            </Button>
+          ) : (
+            <Button
+              size="sm"
+              className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs h-7"
+              onClick={() => setShowOpenCashDialog(true)}
+            >
+              <Unlock className="size-3 mr-1" />
+              ABRIR CAJA
+            </Button>
+          )}
+        </div>
+      </header>
+
+      {/* ─── 3-Column Main ──────────────────────────────────── */}
+      <div className="flex-1 grid grid-cols-[280px_1fr_340px] gap-0 min-h-0 border-x border-gray-200">
+        {/* LEFT: Mesas Ocupadas */}
+        <div className="min-h-0 border-r border-gray-200">
           <TablesPanel
             tables={tables}
             orders={orders}
@@ -327,9 +382,8 @@ export function CajaTab() {
           />
         </div>
 
-        {/* CENTER COLUMN — Order Detail + Payment */}
-        <div className="col-span-5 flex flex-col gap-3 min-h-0">
-          {/* Order Detail (takes most space) */}
+        {/* CENTER: Order Detail + Payment Methods + COBRAR */}
+        <div className="min-h-0 flex flex-col">
           <div className="flex-1 min-h-0">
             <OrderDetailPanel
               selectedTable={selectedTable ? { id: selectedTable.id, number: selectedTable.number, zone: selectedTable.zone } : undefined}
@@ -345,39 +399,28 @@ export function CajaTab() {
               pointsEarned={pointsEarned}
               onBack={() => setPayingTable(null)}
               onCancelOrder={handleCancelOrder}
+              selectedPaymentMethod={selectedPaymentMethod}
+              onPaymentMethodChange={setSelectedPaymentMethod}
+              mixtoEfectivo={mixtoEfectivo}
+              mixtoTarjeta={mixtoTarjeta}
+              onMixtoEfectivoChange={setMixtoEfectivo}
+              onMixtoTarjetaChange={setMixtoTarjeta}
+              onCobrar={handleCobrar}
+              paying={paying}
+              cashSession={cashSession}
+              authHeaders={authHeaders}
             />
           </div>
-
-          {/* Payment Panel (fixed height) */}
-          <PaymentPanel
-            selectedPaymentMethod={selectedPaymentMethod}
-            onPaymentMethodChange={setSelectedPaymentMethod}
-            onCobrar={handleCobrar}
-            paying={paying}
-            total={total}
-            cashSession={cashSession}
-            selectedOrders={selectedOrders}
-            authHeaders={authHeaders}
-            mixtoEfectivo={mixtoEfectivo}
-            mixtoTarjeta={mixtoTarjeta}
-            onMixtoEfectivoChange={setMixtoEfectivo}
-            onMixtoTarjetaChange={setMixtoTarjeta}
-            onCancelOrder={handleCancelOrder}
-            onShowHistory={() => setShowHistory(true)}
-          />
         </div>
 
-        {/* RIGHT COLUMN — Quick Products + Cash Summary */}
-        <div className="col-span-4 flex flex-col gap-3 min-h-0">
-          {/* Quick Products (takes most space) */}
+        {/* RIGHT: Products + Cash Info */}
+        <div className="min-h-0 flex flex-col border-l border-gray-200">
           <div className="flex-1 min-h-0">
             <QuickProductsPanel
               authHeaders={authHeaders}
               handleFetchResponse={handleFetchResponse}
             />
           </div>
-
-          {/* Cash Summary (fixed height) */}
           <CashSummaryPanel
             cashSession={cashSession}
             onOpenCash={() => setShowOpenCashDialog(true)}
@@ -388,12 +431,28 @@ export function CajaTab() {
         </div>
       </div>
 
-      {/* BOTTOM — Calculator */}
-      <div className="shrink-0">
-        <Calculator />
+      {/* ─── Bottom Action Bar ──────────────────────────────── */}
+      <div className="bg-white border-t border-gray-200 px-4 py-2 flex items-center gap-2 shrink-0 rounded-b-lg">
+        <PaymentPanel
+          onCancelOrder={handleCancelOrder}
+          selectedOrders={selectedOrders}
+          authHeaders={authHeaders}
+          onShowHistory={() => setShowHistory(true)}
+          onShowCalculator={() => setShowCalculator(true)}
+        />
       </div>
 
-      {/* ─── Dialogs ──────────────────────────────────────────── */}
+      {/* ─── Calculator Dialog ──────────────────────────────── */}
+      <Dialog open={showCalculator} onOpenChange={setShowCalculator}>
+        <DialogContent className="sm:max-w-sm bg-white border-gray-200 p-4 gap-2">
+          <DialogHeader className="sr-only">
+            <DialogTitle>Calculadora</DialogTitle>
+          </DialogHeader>
+          <Calculator />
+        </DialogContent>
+      </Dialog>
+
+      {/* ─── Cash Session Dialogs ───────────────────────────── */}
       <CashSessionDialogs
         showOpenCashDialog={showOpenCashDialog}
         setShowOpenCashDialog={setShowOpenCashDialog}
