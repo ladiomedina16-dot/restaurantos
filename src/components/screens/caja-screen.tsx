@@ -9,7 +9,6 @@ import { formatEUR, formatTime } from '@/lib/formatters'
 
 // ─── Sub-components ──────────────────────────────────────────────────────────
 import { TablesPanel } from '@/components/caja/tables-panel'
-import { CashDashboard } from '@/components/caja/order-detail-panel'
 import { type PaymentMethod } from '@/components/caja/payment-panel'
 import { QuickProductsPanel } from '@/components/caja/quick-products-panel'
 import { CashSummaryPanel } from '@/components/caja/cash-summary-panel'
@@ -158,13 +157,6 @@ export function CajaTab() {
   const pointsEarned = Math.floor(total)
 
   const clientInfo = selectedOrders.find((o) => o.client)?.client
-
-  // ─── Dashboard Stats ─────────────────────────────────────────
-  const occupiedTablesCount = tables.filter((t) => t.status === 'occupied').length
-  const activeOrdersCount = orders.filter((o) => !['paid', 'cancelled'].includes(o.status)).length
-  const totalPending = orders
-    .filter((o) => !['paid', 'cancelled'].includes(o.status))
-    .reduce((sum, o) => sum + (o.subtotal ?? o.total), 0)
 
   const handleCobrar = async () => {
     if (!selectedTableId || selectedOrders.length === 0) return
@@ -318,8 +310,7 @@ export function CajaTab() {
   if (loading) {
     return (
       <div className="h-[calc(100vh-8rem)] bg-gray-100 rounded-lg p-4">
-        <div className="grid grid-cols-[360px_1fr_340px] gap-2 h-full">
-          <Skeleton className="rounded-lg" />
+        <div className="grid grid-cols-[1fr_360px] gap-0 h-full">
           <Skeleton className="rounded-lg" />
           <Skeleton className="rounded-lg" />
         </div>
@@ -378,9 +369,9 @@ export function CajaTab() {
         </div>
       </header>
 
-      {/* ─── 3-Column Main ──────────────────────────────────── */}
-      <div className="flex-1 grid grid-cols-[360px_1fr_340px] gap-0 min-h-0 border-x border-gray-200">
-        {/* LEFT: Mesas Ocupadas */}
+      {/* ─── 2-Column Main: Tables (70%) | Products + Cash (30%) ─── */}
+      <div className="flex-1 grid grid-cols-[1fr_360px] gap-0 min-h-0 border-x border-gray-200">
+        {/* LEFT/CENTER: Mesas Ocupadas — ocupa ~70% del ancho */}
         <div className="min-h-0 border-r border-gray-200">
           <TablesPanel
             tables={tables}
@@ -397,18 +388,8 @@ export function CajaTab() {
           />
         </div>
 
-        {/* CENTER: Dashboard / Resumen de Caja */}
-        <div className="min-h-0">
-          <CashDashboard
-            cashSession={cashSession}
-            occupiedTablesCount={occupiedTablesCount}
-            activeOrdersCount={activeOrdersCount}
-            totalPending={totalPending}
-          />
-        </div>
-
         {/* RIGHT: Products + Cash Info */}
-        <div className="min-h-0 flex flex-col border-l border-gray-200">
+        <div className="min-h-0 flex flex-col">
           <div className="flex-1 min-h-0">
             <QuickProductsPanel
               authHeaders={authHeaders}

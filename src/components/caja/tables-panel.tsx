@@ -55,7 +55,7 @@ export function TablesPanel({
         </div>
       </div>
 
-      {/* Tables Grid — 2 columns, scrollable */}
+      {/* Tables Grid — responsive, scrollable */}
       <ScrollArea className="flex-1 min-h-0">
         <div className="p-3 space-y-3">
           {tablesByZone.length === 0 ? (
@@ -78,8 +78,8 @@ export function TablesPanel({
                   </Badge>
                 </div>
 
-                {/* 2-column card grid */}
-                <div className="grid grid-cols-2 gap-2">
+                {/* Responsive card grid — 3 cols, 4 on 2xl */}
+                <div className="grid grid-cols-3 2xl:grid-cols-4 gap-2">
                   {zoneTables.map((table) => {
                     const tableOrders = getTableOrders(table.id)
                     const isReady = hasReadyOrders(table.id)
@@ -94,7 +94,7 @@ export function TablesPanel({
                     return (
                       <button
                         key={table.id}
-                        className={`w-full p-3 rounded-xl border-2 transition-all text-left active:scale-[0.97] min-h-[100px] flex flex-col justify-between ${
+                        className={`w-full p-3 rounded-xl border-2 transition-all text-left active:scale-[0.97] min-h-[110px] flex flex-col justify-between ${
                           isSelected
                             ? 'bg-emerald-50 border-emerald-400 shadow-md shadow-emerald-100'
                             : isReady
