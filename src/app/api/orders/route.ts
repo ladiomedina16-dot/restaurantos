@@ -72,6 +72,14 @@ export async function GET(request: Request) {
         finishedBy: {
           select: { id: true, username: true, name: true, role: true },
         },
+        payments: {
+          include: {
+            user: {
+              select: { id: true, username: true, name: true, role: true },
+            },
+          },
+          orderBy: { createdAt: 'desc' },
+        },
       },
       orderBy: { createdAt: 'desc' },
     })

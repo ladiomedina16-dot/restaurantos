@@ -67,6 +67,24 @@ export interface Order {
   createdBy?: { id: string; username: string; name: string; role: string } | null
   finishedBy?: { id: string; username: string; name: string; role: string } | null
   cancelledBy?: { id: string; username: string; name: string; role: string } | null
+  payments?: PaymentDetail[]
+}
+
+// ─── Client ────────────────────────────────────────────────────────────────
+
+// ─── Payment Detail (from Order.payments) ──────────────────────────────────
+
+export interface PaymentDetail {
+  id: string
+  orderId: string
+  userId: string | null
+  amount: number
+  method: string         // efectivo, tarjeta
+  discount: number
+  freeDrinks: number
+  pointsEarned: number
+  createdAt: string
+  user: { id: string; username: string; name: string; role: string } | null
 }
 
 // ─── Client ────────────────────────────────────────────────────────────────
