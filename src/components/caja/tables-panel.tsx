@@ -1,6 +1,6 @@
 'use client'
 
-import { RefreshCw, Clock, Grid3x3, Users } from 'lucide-react'
+import { RefreshCw, Clock, Grid3x3, Users, ShoppingBag } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Badge } from '@/components/ui/badge'
@@ -55,9 +55,9 @@ export function TablesPanel({
         </div>
       </div>
 
-      {/* Tables List — scrollable */}
+      {/* Tables Grid — 2 columns, scrollable */}
       <ScrollArea className="flex-1 min-h-0">
-        <div className="p-3 space-y-2">
+        <div className="p-3 space-y-3">
           {tablesByZone.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-12 text-gray-400">
               <Grid3x3 className="size-10 mb-3 opacity-30" />
@@ -68,77 +68,84 @@ export function TablesPanel({
             tablesByZone.map(({ zone, config: cfg, tables: zoneTables }) => (
               <div key={zone}>
                 {/* Zone header */}
-                <div className="flex items-center gap-1.5 px-1 mb-2">
+                <div className="flex items-center gap-1.5 px-0.5 mb-2">
                   <span className="scale-75">{cfg?.icon}</span>
                   <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">
                     {cfg?.label ?? zone}
                   </span>
+                  <Badge variant="outline" className="text-[9px] bg-gray-50 text-gray-400 border-gray-200 px-1 py-0 ml-1">
+                    {zoneTables.length}
+                  </Badge>
                 </div>
 
-                {/* Table cards */}
-                {zoneTables.map((table) => {
-                  const tableOrders = getTableOrders(table.id)
-                  const isReady = hasReadyOrders(table.id)
-                  const orderTotal = tableOrders.reduce((s, o) => s + (o.subtotal ?? o.total), 0)
-                  const itemCount = tableOrders.reduce((s, o) => s + o.items.length, 0)
-                  const isSelected = selectedTableId === table.id
-                  const earliestOrder = tableOrders.sort(
-                    (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
-                  )[0]
-                  const customerName = tableOrders[0]?.client?.name
+                {/* 2-column card grid */}
+                <div className="grid grid-cols-2 gap-2">
+                  {zoneTables.map((table) => {
+                    const tableOrders = getTableOrders(table.id)
+                    const isReady = hasReadyOrders(table.id)
+                    const orderTotal = tableOrders.reduce((s, o) => s + (o.subtotal ?? o.total), 0)
+                    const itemCount = tableOrders.reduce((s, o) => s + o.items.length, 0)
+                    const isSelected = selectedTableId === table.id
+                    const earliestOrder = [...tableOrders].sort(
+                      (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+                    )[0]
+                    const customerName = tableOrders[0]?.client?.name
 
-                  return (
-                    <button
-                      key={table.id}
-                      className={`w-full mb-1.5 p-3 rounded-lg border transition-all text-left active:scale-[0.98] ${
-                        isSelected
-                          ? 'bg-emerald-50 border-emerald-400 shadow-sm'
-                          : isReady
-                          ? 'bg-emerald-50/40 border-emerald-200 hover:border-emerald-400'
-                          : 'bg-white border-gray-200 hover:border-emerald-300 hover:bg-gray-50'
-                      }`}
-                      onClick={() => onSelectTable(table.id)}
-                    >
-                      {/* Row 1: Table number + Total */}
-                      <div className="flex items-center justify-between">
-                        <span className={`text-sm font-bold ${isSelected ? 'text-emerald-700' : 'text-gray-800'}`}>
-                          Mesa {table.number}
-                        </span>
-                        <div className="flex items-center gap-1.5">
+                    return (
+                      <button
+                        key={table.id}
+                        className={`w-full p-3 rounded-xl border-2 transition-all text-left active:scale-[0.97] min-h-[100px] flex flex-col justify-between ${
+                          isSelected
+                            ? 'bg-emerald-50 border-emerald-400 shadow-md shadow-emerald-100'
+                            : isReady
+                            ? 'bg-emerald-50/30 border-emerald-300 hover:border-emerald-400 hover:shadow-sm'
+                            : 'bg-white border-gray-200 hover:border-emerald-300 hover:bg-gray-50 hover:shadow-sm'
+                        }`}
+                        onClick={() => onSelectTable(table.id)}
+                      >
+                        {/* Top row: Mesa number + Ready badge */}
+                        <div className="flex items-start justify-between gap-1">
+                          <span className={`text-base font-extrabold leading-tight ${isSelected ? 'text-emerald-700' : 'text-gray-800'}`}>
+                            Mesa {table.number}
+                          </span>
                           {isReady && (
-                            <Badge className="text-[8px] bg-emerald-100 text-emerald-700 border border-emerald-300 px-1.5 py-0 rounded-full">
+                            <Badge className="text-[8px] bg-emerald-500 text-white border-0 px-1.5 py-0 rounded-full shrink-0 animate-pulse">
                               LISTO
                             </Badge>
                           )}
-                          <span className="text-sm font-bold text-emerald-600">
+                        </div>
+
+                        {/* Total — large and prominent */}
+                        <div className="mt-1">
+                          <span className="text-lg font-black text-emerald-600 leading-tight">
                             {formatEUR(orderTotal)}
                           </span>
                         </div>
-                      </div>
 
-                      {/* Row 2: Items count + Customer */}
-                      <div className="flex items-center justify-between mt-1">
-                        <span className="text-[11px] text-gray-500 flex items-center gap-1">
-                          <ShoppingBagIcon className="size-3" />
-                          {itemCount} {itemCount === 1 ? 'item' : 'items'}
-                          {customerName && (
-                            <>
-                              <span className="text-gray-300 mx-0.5">·</span>
-                              <Users className="size-3" />
-                              {customerName}
-                            </>
-                          )}
-                        </span>
-                        {earliestOrder && (
-                          <span className="text-[11px] text-gray-400 flex items-center gap-0.5">
-                            <Clock className="size-3" />
-                            {formatTime(earliestOrder.createdAt)}
+                        {/* Bottom row: Items + Customer + Time */}
+                        <div className="flex items-center justify-between mt-1.5">
+                          <span className="text-[10px] text-gray-500 flex items-center gap-0.5 truncate">
+                            <ShoppingBag className="size-2.5 shrink-0" />
+                            {itemCount} {itemCount === 1 ? 'item' : 'items'}
+                            {customerName && (
+                              <>
+                                <span className="text-gray-300 mx-0.5">·</span>
+                                <Users className="size-2.5 shrink-0" />
+                                <span className="truncate">{customerName}</span>
+                              </>
+                            )}
                           </span>
-                        )}
-                      </div>
-                    </button>
-                  )
-                })}
+                          {earliestOrder && (
+                            <span className="text-[10px] text-gray-400 flex items-center gap-0.5 shrink-0 ml-1">
+                              <Clock className="size-2.5" />
+                              {formatTime(earliestOrder.createdAt)}
+                            </span>
+                          )}
+                        </div>
+                      </button>
+                    )
+                  })}
+                </div>
               </div>
             ))
           )}
@@ -158,25 +165,5 @@ export function TablesPanel({
         </Button>
       </div>
     </div>
-  )
-}
-
-/** Small inline icon for items count — avoids extra import */
-function ShoppingBagIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      xmlns="http://www.w3.org/2000/svg"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-    >
-      <path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4Z" />
-      <path d="M3 6h18" />
-      <path d="M16 10a4 4 0 0 1-8 0" />
-    </svg>
   )
 }

@@ -306,7 +306,7 @@ export function CajaTab() {
   if (loading) {
     return (
       <div className="h-[calc(100vh-8rem)] bg-gray-100 rounded-lg p-4">
-        <div className="grid grid-cols-[280px_1fr_340px] gap-2 h-full">
+        <div className="grid grid-cols-[360px_1fr_340px] gap-2 h-full">
           <Skeleton className="rounded-lg" />
           <Skeleton className="rounded-lg" />
           <Skeleton className="rounded-lg" />
@@ -367,7 +367,7 @@ export function CajaTab() {
       </header>
 
       {/* ─── 3-Column Main ──────────────────────────────────── */}
-      <div className="flex-1 grid grid-cols-[280px_1fr_340px] gap-0 min-h-0 border-x border-gray-200">
+      <div className="flex-1 grid grid-cols-[360px_1fr_340px] gap-0 min-h-0 border-x border-gray-200">
         {/* LEFT: Mesas Ocupadas */}
         <div className="min-h-0 border-r border-gray-200">
           <TablesPanel
