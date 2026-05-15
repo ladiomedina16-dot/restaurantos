@@ -1,62 +1,39 @@
 'use client'
 
 import { useEffect, useState, useCallback } from 'react'
-import {
-  ArrowLeft,
-  ShoppingCart,
-  CheckCircle,
-  XCircle,
-  Phone,
-  Star,
-  Flame,
-  Beer,
-  UserCircle,
-  Euro,
-  CreditCard,
-  Receipt,
-  Plus,
-  CircleDot,
-  Lock,
-  Printer,
-  FileText,
-} from 'lucide-react'
-import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { ScrollArea } from '@/components/ui/scroll-area'
-import { Separator } from '@/components/ui/separator'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 import { Skeleton } from '@/components/ui/skeleton'
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-  DialogDescription,
-} from '@/components/ui/dialog'
 import { useAuth } from '@/components/common/auth-context'
 import { toast } from 'sonner'
 import type { TableItem, Order, SupplierPaymentItem } from '@/types/restaurant'
-import { formatEUR, formatTime } from '@/lib/formatters'
-import { handlePrintTicket } from '@/lib/print-client'
-import { zoneOrder } from '@/lib/constants'
-import { zoneConfig } from '@/lib/config-ui'
+import { formatEUR } from '@/lib/formatters'
 
-// ─── CAJA TAB (Cash Register) ───────────────────────────────────────────────
+// ─── Sub-components ──────────────────────────────────────────────────────────
+import { TablesPanel } from '@/components/caja/tables-panel'
+import { OrderDetailPanel } from '@/components/caja/order-detail-panel'
+import { PaymentPanel, type PaymentMethod } from '@/components/caja/payment-panel'
+import { QuickProductsPanel } from '@/components/caja/quick-products-panel'
+import { CashSummaryPanel } from '@/components/caja/cash-summary-panel'
+import { CashSessionDialogs } from '@/components/caja/cash-session-dialogs'
+import { Calculator } from '@/components/caja/calculator'
+
+// ─── CAJA TAB — POS Modern Layout ────────────────────────────────────────────
 
 export function CajaTab() {
+  // ─── Core State ────────────────────────────────────────────────
   const [tables, setTables] = useState<TableItem[]>([])
   const [orders, setOrders] = useState<Order[]>([])
   const [loading, setLoading] = useState(true)
   const [payingTable, setPayingTable] = useState<string | null>(null)
   const [paying, setPaying] = useState(false)
   const [now, setNow] = useState(Date.now())
-  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<'efectivo' | 'tarjeta'>('efectivo')
+  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<PaymentMethod>('efectivo')
   const { authHeaders, handleFetchResponse } = useAuth()
 
-  // ─── Cash Session State ──────────────────────────────────────
+  // ─── Mixto Payment State ───────────────────────────────────────
+  const [mixtoEfectivo, setMixtoEfectivo] = useState('')
+  const [mixtoTarjeta, setMixtoTarjeta] = useState('')
+
+  // ─── Cash Session State ────────────────────────────────────────
   const [cashSession, setCashSession] = useState<any>(null)
   const [showOpenCashDialog, setShowOpenCashDialog] = useState(false)
   const [showCloseCashDialog, setShowCloseCashDialog] = useState(false)
@@ -71,6 +48,10 @@ export function CajaTab() {
   const [supplierAmount, setSupplierAmount] = useState('')
   const [addingSupplier, setAddingSupplier] = useState(false)
 
+  // ─── History Dialog State (future expansion) ───────────────────
+  const [showHistory, setShowHistory] = useState(false)
+
+  // ─── Fetch Callbacks (PRESERVED EXACTLY) ──────────────────────
   const fetchTables = useCallback(async () => {
     try {
       const res = await fetch('/api/tables', { headers: authHeaders(false) })
@@ -109,24 +90,6 @@ export function CajaTab() {
     } catch { /* silently fail */ }
   }, [authHeaders, handleFetchResponse])
 
-  useEffect(() => {
-    const load = async () => {
-      await Promise.all([fetchTables(), fetchActiveOrders(), fetchCashSession()])
-      setLoading(false)
-    }
-    load()
-    const interval = setInterval(() => { fetchTables(); fetchActiveOrders() }, 8000)
-    return () => clearInterval(interval)
-  }, [fetchTables, fetchActiveOrders, fetchCashSession])
-
-  // Update time
-  useEffect(() => {
-    const interval = setInterval(() => setNow(Date.now()), 10000)
-    return () => clearInterval(interval)
-  }, [])
-
-  // Polling: caja refreshes via interval (Vercel-compatible, no Socket.io)
-
   const fetchSupplierPayments = useCallback(async () => {
     if (!cashSession?.id) { setSupplierPayments([]); return }
     try {
@@ -138,50 +101,37 @@ export function CajaTab() {
     } catch { /* silently fail */ }
   }, [authHeaders, handleFetchResponse, cashSession])
 
+  // ─── Effects (PRESERVED) ───────────────────────────────────────
+  useEffect(() => {
+    const load = async () => {
+      await Promise.all([fetchTables(), fetchActiveOrders(), fetchCashSession()])
+      setLoading(false)
+    }
+    load()
+    const interval = setInterval(() => { fetchTables(); fetchActiveOrders() }, 8000)
+    return () => clearInterval(interval)
+  }, [fetchTables, fetchActiveOrders, fetchCashSession])
+
+  useEffect(() => {
+    const interval = setInterval(() => setNow(Date.now()), 10000)
+    return () => clearInterval(interval)
+  }, [])
+
   useEffect(() => {
     fetchSupplierPayments()
   }, [fetchSupplierPayments])
 
-  const handleAddSupplier = async () => {
-    if (!supplierConcept.trim() || !supplierAmount) return
-    setAddingSupplier(true)
-    try {
-      const res = await fetch('/api/supplier-payments', {
-        method: 'POST',
-        headers: authHeaders(),
-        body: JSON.stringify({ concept: supplierConcept.trim(), amount: parseFloat(supplierAmount) }),
-      })
-      if (handleFetchResponse(res) && res.ok) {
-        toast.success('Pago a proveedor registrado')
-        setSupplierConcept('')
-        setSupplierAmount('')
-        setShowSupplierDialog(false)
-        fetchSupplierPayments()
-      } else {
-        const err = await res.json()
-        toast.error(err.error || 'Error al registrar pago')
-      }
-    } catch {
-      toast.error('Error de red')
-    } finally {
-      setAddingSupplier(false)
-    }
-  }
-
-  // Get orders for a table
+  // ─── Business Logic (PRESERVED EXACTLY) ───────────────────────
   const getTableOrders = (tableId: string) =>
     orders.filter((o) => o.tableId === tableId && !['paid', 'cancelled'].includes(o.status))
 
-  // Check if table has "ready" orders
   const hasReadyOrders = (tableId: string) =>
     getTableOrders(tableId).some((o) => o.status === 'ready')
 
-  // Selected table for payment
   const selectedTableId = payingTable
   const selectedTable = tables.find((t) => t.id === selectedTableId)
   const selectedOrders = selectedTableId ? getTableOrders(selectedTableId) : []
 
-  // Calculate totals for selected table
   const allItems = selectedOrders.flatMap((o) => o.items)
   const subtotal = allItems.reduce((sum, item) => sum + item.subtotal, 0)
 
@@ -196,7 +146,6 @@ export function CajaTab() {
   const total = Math.max(0, subtotal - finalDiscount)
   const pointsEarned = Math.floor(total)
 
-  // Get the client info from orders
   const clientInfo = selectedOrders.find((o) => o.client)?.client
 
   const handleCobrar = async () => {
@@ -207,7 +156,6 @@ export function CajaTab() {
     }
     setPaying(true)
     try {
-      // Pay each order
       for (const order of selectedOrders) {
         const res = await fetch(`/api/orders/${order.id}/pay`, {
           method: 'POST',
@@ -223,6 +171,9 @@ export function CajaTab() {
       }
       toast.success(`Mesa ${selectedTable?.number ?? '?'} cobrada — ${formatEUR(total)}`)
       setPayingTable(null)
+      setSelectedPaymentMethod('efectivo')
+      setMixtoEfectivo('')
+      setMixtoTarjeta('')
       fetchTables()
       fetchActiveOrders()
     } catch {
@@ -257,623 +208,218 @@ export function CajaTab() {
     }
   }
 
-  // Group tables by zone
-  const tablesByZone = zoneOrder
-    .map((z) => ({
-      zone: z,
-      config: zoneConfig[z],
-      tables: tables.filter((t) => t.zone === z),
-    }))
-    .filter((g) => g.tables.length > 0)
+  // ─── Dialog Handlers (PRESERVED) ──────────────────────────────
+  const handleOpenCash = async () => {
+    setCashSessionLoading(true)
+    try {
+      const res = await fetch('/api/cash-sessions', {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify({ openingCash: parseFloat(openingCashInput) }),
+      })
+      if (handleFetchResponse(res) && res.ok) {
+        toast.success('Caja abierta correctamente')
+        setShowOpenCashDialog(false)
+        setOpeningCashInput('')
+        fetchCashSession()
+      } else {
+        const err = await res.json()
+        toast.error(err.error || 'Error al abrir caja')
+      }
+    } catch {
+      toast.error('Error de red')
+    } finally {
+      setCashSessionLoading(false)
+    }
+  }
 
+  const handleCloseCash = async () => {
+    setCashSessionLoading(true)
+    try {
+      const res = await fetch(`/api/cash-sessions/${cashSession.id}`, {
+        method: 'PUT',
+        headers: authHeaders(),
+        body: JSON.stringify({
+          closingCash: parseFloat(closingCashInput),
+          closingCard: parseFloat(closingCardInput) || 0,
+        }),
+      })
+      if (handleFetchResponse(res) && res.ok) {
+        const data = await res.json()
+        setCashCloseSummary(data.cashSession ?? data)
+        toast.success('Caja cerrada correctamente')
+        setShowCloseCashDialog(false)
+        setClosingCashInput('')
+        setClosingCardInput('')
+        setCashSession(null)
+        fetchCashSession()
+      } else {
+        let errorMsg = 'Error al cerrar caja'
+        try {
+          const err = await res.json()
+          errorMsg = err.error || errorMsg
+        } catch { /* not JSON */ }
+        toast.error(errorMsg)
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Error de conexión'
+      toast.error(msg)
+    } finally {
+      setCashSessionLoading(false)
+    }
+  }
+
+  const handleAddSupplier = async () => {
+    if (!supplierConcept.trim() || !supplierAmount) return
+    setAddingSupplier(true)
+    try {
+      const res = await fetch('/api/supplier-payments', {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify({ concept: supplierConcept.trim(), amount: parseFloat(supplierAmount) }),
+      })
+      if (handleFetchResponse(res) && res.ok) {
+        toast.success('Pago a proveedor registrado')
+        setSupplierConcept('')
+        setSupplierAmount('')
+        setShowSupplierDialog(false)
+        fetchSupplierPayments()
+      } else {
+        const err = await res.json()
+        toast.error(err.error || 'Error al registrar pago')
+      }
+    } catch {
+      toast.error('Error de red')
+    } finally {
+      setAddingSupplier(false)
+    }
+  }
+
+  // ─── Loading State ─────────────────────────────────────────────
   if (loading) {
     return (
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {Array.from({ length: 6 }).map((_, i) => (
-          <Skeleton key={i} className="h-36 rounded-xl" />
-        ))}
-      </div>
-    )
-  }
-
-  // ─── Payment Panel ──────────────────────────────────────────
-  if (selectedTableId && selectedTable) {
-    return (
-      <div className="space-y-4">
-        <div className="flex items-center gap-3">
-          <Button variant="outline" size="sm" className="h-12" onClick={() => setPayingTable(null)}>
-            <ArrowLeft className="size-5" />
-          </Button>
-          <h2 className="text-2xl font-bold">Mesa {selectedTable.number}</h2>
-          <span className="text-muted-foreground">{zoneConfig[selectedTable.zone]?.label ?? selectedTable.zone}</span>
-        </div>
-
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Left: Orders & Items */}
-          <Card className="rounded-xl">
-            <CardHeader className="pb-3">
-              <CardTitle className="text-lg flex items-center gap-2">
-                <Receipt className="size-5" />
-                Pedidos activos ({selectedOrders.length})
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <ScrollArea className="max-h-96">
-                {selectedOrders.length === 0 ? (
-                  <p className="text-muted-foreground text-sm">No hay pedidos activos</p>
-                ) : (
-                  <div className="space-y-4">
-                    {selectedOrders.map((order) => (
-                      <div key={order.id} className="border rounded-lg p-3">
-                        <div className="flex items-center justify-between mb-2">
-                          <Badge
-                            variant="outline"
-                            className={
-                              order.status === 'ready'
-                                ? 'bg-green-100 text-green-800 border-green-200'
-                                : order.status === 'pending'
-                                ? 'bg-amber-100 text-amber-800 border-amber-200'
-                                : 'bg-orange-100 text-orange-800 border-orange-200'
-                            }
-                          >
-                            {order.status === 'ready' ? '✅ Listo' : order.status === 'pending' ? '⏳ Pendiente' : '🔥 En curso'}
-                          </Badge>
-                          <div className="flex items-center gap-2">
-                            <span className="text-xs text-muted-foreground">{formatTime(order.createdAt)}</span>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-7 w-7 p-0 text-red-500 hover:text-red-700 hover:bg-red-50"
-                              onClick={() => handleCancelOrder(order.id)}
-                              title="Cancelar pedido"
-                            >
-                              <XCircle className="size-4" />
-                            </Button>
-                          </div>
-                        </div>
-                        <div className="space-y-1">
-                          {order.items.map((item) => (
-                            <div key={item.id} className="flex justify-between text-sm">
-                              <span>
-                                <span className="font-medium">{item.quantity}x</span>{' '}
-                                {item.product?.name ?? 'Producto'}
-                              </span>
-                              <span className="text-muted-foreground">{formatEUR(item.subtotal)}</span>
-                            </div>
-                          ))}
-                        </div>
-                        {order.client && (
-                          <p className="text-xs text-muted-foreground mt-2">
-                            <UserCircle className="size-3 inline mr-1" />
-                            {order.client.name} · {order.client.phone}
-                          </p>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </ScrollArea>
-            </CardContent>
-          </Card>
-
-          {/* Right: Totals & Pay */}
-          <Card className="rounded-xl">
-            <CardHeader className="pb-3">
-              <CardTitle className="text-lg flex items-center gap-2">
-                <CreditCard className="size-5" />
-                Cuenta
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {/* Client info */}
-              {clientInfo && (
-                <div className="bg-amber-50 rounded-lg p-3">
-                  <div className="flex items-center gap-2">
-                    <UserCircle className="size-5 text-amber-600" />
-                    <span className="font-semibold">{clientInfo.name}</span>
-                  </div>
-                  <div className="flex gap-4 mt-1 text-sm text-muted-foreground">
-                    <span><Phone className="size-3 inline mr-1" />{clientInfo.phone}</span>
-                    {clientInfo.points !== undefined && <span><Star className="size-3 inline mr-1" />{clientInfo.points} pts</span>}
-                    {clientInfo.visits !== undefined && <span>Visitas: {clientInfo.visits}</span>}
-                  </div>
-                </div>
-              )}
-
-              {/* Summary */}
-              <div className="space-y-2">
-                <div className="flex justify-between text-sm">
-                  <span>Subtotal</span>
-                  <span>{formatEUR(subtotal)}</span>
-                </div>
-
-                {/* 5ª Gratis */}
-                {hasClient && freeDrinks > 0 && (
-                  <div className="flex justify-between text-sm text-green-700">
-                    <span>
-                      <Beer className="size-3 inline mr-1" />
-                      5ª GRATIS: {freeDrinks} bebida{freeDrinks > 1 ? 's' : ''} gratis
-                    </span>
-                    <span>-{formatEUR(finalDiscount)}</span>
-                  </div>
-                )}
-                {hasClient && bebidasTotal > 0 && freeDrinks === 0 && (
-                  <div className="text-xs text-muted-foreground">
-                    <Beer className="size-3 inline mr-1" />
-                    {bebidasTotal}/5 bebidas para 5ª gratis
-                  </div>
-                )}
-                {!hasClient && bebidasTotal >= 5 && (
-                  <div className="text-xs text-amber-600">
-                    <Beer className="size-3 inline mr-1" />
-                    Asigna un cliente para aplicar 5ª gratis ({bebidasTotal} bebidas)
-                  </div>
-                )}
-
-                <Separator />
-
-                <div className="flex justify-between text-xl font-bold">
-                  <span>Total</span>
-                  <span className="text-amber-700">{formatEUR(total)}</span>
-                </div>
-
-                {pointsEarned > 0 && (
-                  <div className="text-sm text-muted-foreground">
-                    <Star className="size-3 inline mr-1" />
-                    Puntos a ganar: <span className="font-semibold text-amber-700">{pointsEarned}</span>
-                  </div>
-                )}
-              </div>
-
-              <div className="flex gap-2">
-                <Button
-                  variant={selectedPaymentMethod === 'efectivo' ? 'default' : 'outline'}
-                  className={`flex-1 h-12 ${selectedPaymentMethod === 'efectivo' ? 'bg-green-600 hover:bg-green-700 text-white' : ''}`}
-                  onClick={() => setSelectedPaymentMethod('efectivo')}
-                >
-                  <Euro className="size-5 mr-2" />
-                  Efectivo
-                </Button>
-                <Button
-                  variant={selectedPaymentMethod === 'tarjeta' ? 'default' : 'outline'}
-                  className={`flex-1 h-12 ${selectedPaymentMethod === 'tarjeta' ? 'bg-blue-600 hover:bg-blue-700 text-white' : ''}`}
-                  onClick={() => setSelectedPaymentMethod('tarjeta')}
-                >
-                  <CreditCard className="size-5 mr-2" />
-                  Tarjeta
-                </Button>
-              </div>
-
-              <Button
-                className="w-full h-16 text-xl font-bold bg-green-600 hover:bg-green-700 text-white"
-                onClick={handleCobrar}
-                disabled={paying || selectedOrders.length === 0 || !cashSession}
-              >
-                <Euro className="size-6 mr-2" />
-                {paying ? 'Cobrando...' : 'COBRAR'}
-              </Button>
-
-              {!cashSession && (
-                <p className="text-sm text-red-600 text-center font-medium mt-1">
-                  Abre caja para poder cobrar
-                </p>
-              )}
-
-              {/* Print ticket / factura buttons */}
-              <div className="flex gap-2 mt-2">
-                <Button
-                  variant="outline"
-                  className="flex-1 h-12"
-                  onClick={() => {
-                    if (selectedOrders.length > 0) {
-                      handlePrintTicket('receipt', selectedOrders[0].id, authHeaders, 'ticket')
-                    }
-                  }}
-                >
-                  <Printer className="size-4 mr-2" />
-                  Imprimir Ticket
-                </Button>
-                <Button
-                  variant="outline"
-                  className="flex-1 h-12"
-                  onClick={() => {
-                    if (selectedOrders.length > 0) {
-                      handlePrintTicket('receipt', selectedOrders[0].id, authHeaders, 'factura')
-                    }
-                  }}
-                >
-                  <FileText className="size-4 mr-2" />
-                  Imprimir Factura
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
+      <div className="h-[calc(100vh-120px)] bg-slate-950 rounded-xl p-4">
+        <div className="grid grid-cols-3 gap-3 h-full">
+          <Skeleton className="rounded-xl bg-slate-800/50" />
+          <Skeleton className="rounded-xl bg-slate-800/50" />
+          <Skeleton className="rounded-xl bg-slate-800/50" />
         </div>
       </div>
     )
   }
 
-  // ─── Tables Overview ────────────────────────────────────────
+  // ─── POS Layout ────────────────────────────────────────────────
   return (
-    <div className="space-y-4">
-      {/* Cash Session Section */}
-      <Card className="rounded-xl border-2 border-amber-200 bg-amber-50/50">
-        <CardContent className="p-4">
-          {!cashSession ? (
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="font-bold text-lg flex items-center gap-2">
-                  <Lock className="size-5 text-red-600" />
-                  Caja Cerrada
-                </h3>
-                <p className="text-sm text-muted-foreground">Debes abrir caja para poder cobrar</p>
-              </div>
-              <Button
-                className="bg-green-600 hover:bg-green-700 text-white"
-                onClick={() => setShowOpenCashDialog(true)}
-              >
-                Abrir Caja
-              </Button>
-            </div>
-          ) : (
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="font-bold text-lg flex items-center gap-2">
-                  <CheckCircle className="size-5 text-green-600" />
-                  Caja Abierta
-                </h3>
-                <p className="text-sm text-muted-foreground">
-                  Apertura: {formatEUR(cashSession.openingCash)} ·
-                  Iniciada: {formatTime(cashSession.openedAt)}
-                  {cashSession.openedBy && ` · Por: ${cashSession.openedBy.name ?? cashSession.openedBy.username ?? 'Usuario eliminado'}`}
-                  {!cashSession.openedBy && ' · Por: Usuario eliminado'}
-                </p>
-              </div>
-              <Button
-                variant="outline"
-                className="border-red-300 text-red-700 hover:bg-red-50"
-                onClick={() => setShowCloseCashDialog(true)}
-              >
-                Cerrar Caja
-              </Button>
-            </div>
-          )}
-          {cashCloseSummary && (
-            <div className="mt-3 p-3 bg-white rounded-lg border text-sm space-y-1">
-              <p className="font-bold text-base mb-1">Resumen de cierre</p>
-              <div className="flex justify-between"><span>Ventas totales:</span><span className="font-semibold">{formatEUR(cashCloseSummary.totalSales ?? 0)}</span></div>
-              <div className="flex justify-between"><span>Efectivo sistema:</span><span className="font-semibold">{formatEUR(cashCloseSummary.totalCash ?? 0)}</span></div>
-              <div className="flex justify-between"><span>Tarjeta sistema:</span><span className="font-semibold">{formatEUR(cashCloseSummary.totalCard ?? 0)}</span></div>
-              <div className="flex justify-between"><span>Proveedores:</span><span className="font-semibold text-orange-700">-{formatEUR(cashCloseSummary.totalSuppliers ?? 0)}</span></div>
-              <Separator />
-              <p className="font-semibold text-sm mt-1">Efectivo</p>
-              <div className="flex justify-between"><span>Esperado (apertura + efectivo - proveedores):</span><span className="font-semibold">{formatEUR(cashCloseSummary.expectedCash ?? 0)}</span></div>
-              <div className="flex justify-between"><span>Contado:</span><span className="font-semibold">{formatEUR(cashCloseSummary.closingCash ?? 0)}</span></div>
-              <div className="flex justify-between"><span>Diferencia efectivo:</span>
-                <span className={`font-bold ${(cashCloseSummary.difference ?? 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                  {formatEUR(cashCloseSummary.difference ?? 0)}
-                </span>
-              </div>
-              <Separator />
-              <p className="font-semibold text-sm mt-1">Tarjeta</p>
-              <div className="flex justify-between"><span>Tarjeta sistema:</span><span className="font-semibold">{formatEUR(cashCloseSummary.totalCard ?? 0)}</span></div>
-              <div className="flex justify-between"><span>Tarjeta contada:</span><span className="font-semibold">{formatEUR(cashCloseSummary.closingCard ?? 0)}</span></div>
-              <div className="flex justify-between"><span>Diferencia tarjeta:</span>
-                <span className={`font-bold ${(cashCloseSummary.cardDifference ?? 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                  {formatEUR(cashCloseSummary.cardDifference ?? 0)}
-                </span>
-              </div>
-              <Separator />
-              <div className="flex justify-between text-base"><span className="font-bold">Diferencia total:</span>
-                <span className={`font-bold ${(cashCloseSummary.totalDifference ?? 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                  {formatEUR(cashCloseSummary.totalDifference ?? 0)}
-                </span>
-              </div>
-              {(cashCloseSummary.supplierPayments ?? []).length > 0 && (
-                <div className="mt-2 pt-2 border-t">
-                  <p className="text-xs font-semibold mb-1">Pagos a proveedores:</p>
-                  {(cashCloseSummary.supplierPayments ?? []).map((sp: { id: string; concept: string; amount: number; registeredBy: string }) => (
-                    <div key={sp.id} className="flex justify-between text-xs">
-                      <span>{sp.concept} ({sp.registeredBy})</span>
-                      <span className="text-orange-700">-{formatEUR(sp.amount)}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-              <Button variant="ghost" size="sm" className="mt-1 text-xs" onClick={() => setCashCloseSummary(null)}>
-                Cerrar resumen
-              </Button>
-            </div>
-          )}
-        </CardContent>
-      </Card>
+    <div className="h-[calc(100vh-120px)] flex flex-col gap-3">
+      {/* 3-Column Main Area */}
+      <div className="flex-1 grid grid-cols-12 gap-3 min-h-0">
+        {/* LEFT COLUMN — Occupied Tables */}
+        <div className="col-span-3 min-h-0">
+          <TablesPanel
+            tables={tables}
+            orders={orders}
+            selectedTableId={selectedTableId}
+            onSelectTable={setPayingTable}
+            onRefresh={() => { fetchTables(); fetchActiveOrders() }}
+            getTableOrders={getTableOrders}
+            hasReadyOrders={hasReadyOrders}
+            now={now}
+          />
+        </div>
 
-      {/* Supplier Payments Section */}
-      {cashSession && (
-        <Card className="rounded-xl border-2 border-orange-200 bg-orange-50/50">
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between mb-3">
-              <div className="flex items-center gap-2">
-                <Flame className="size-5 text-orange-600" />
-                <h3 className="font-bold text-lg">Pagos a Proveedores</h3>
-                {supplierPayments.length > 0 && (
-                  <Badge variant="outline" className="text-xs">
-                    {supplierPayments.length} pago{supplierPayments.length > 1 ? 's' : ''} · {formatEUR(supplierPayments.reduce((s, sp) => s + sp.amount, 0))}
-                  </Badge>
-                )}
-              </div>
-              <Button
-                size="sm"
-                className="bg-orange-600 hover:bg-orange-700 text-white"
-                onClick={() => setShowSupplierDialog(true)}
-              >
-                <Plus className="size-4 mr-1" />
-                Añadir
-              </Button>
-            </div>
-            {supplierPayments.length > 0 ? (
-              <ScrollArea className="max-h-32">
-                <div className="space-y-1">
-                  {supplierPayments.map((sp) => (
-                    <div key={sp.id} className="flex items-center justify-between text-sm bg-white rounded-lg p-2">
-                      <div>
-                        <span className="font-medium">{sp.concept}</span>
-                        <span className="text-muted-foreground ml-2 text-xs">
-                          {sp.user?.name || sp.user?.username || 'Usuario eliminado'} · {formatTime(sp.createdAt)}
-                        </span>
-                      </div>
-                      <span className="font-bold text-orange-700">{formatEUR(sp.amount)}</span>
-                    </div>
-                  ))}
-                </div>
-              </ScrollArea>
-            ) : (
-              <p className="text-sm text-muted-foreground">No hay pagos a proveedores registrados</p>
-            )}
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Open Cash Dialog */}
-      <Dialog open={showOpenCashDialog} onOpenChange={setShowOpenCashDialog}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Abrir Caja</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <Label>Efectivo de apertura (€)</Label>
-              <Input
-                type="number"
-                step="0.01"
-                placeholder="0.00"
-                value={openingCashInput}
-                onChange={(e) => setOpeningCashInput(e.target.value)}
-              />
-            </div>
+        {/* CENTER COLUMN — Order Detail + Payment */}
+        <div className="col-span-5 flex flex-col gap-3 min-h-0">
+          {/* Order Detail (takes most space) */}
+          <div className="flex-1 min-h-0">
+            <OrderDetailPanel
+              selectedTable={selectedTable ? { id: selectedTable.id, number: selectedTable.number, zone: selectedTable.zone } : undefined}
+              selectedOrders={selectedOrders}
+              allItems={allItems}
+              subtotal={subtotal}
+              finalDiscount={finalDiscount}
+              total={total}
+              hasClient={hasClient}
+              freeDrinks={freeDrinks}
+              bebidasTotal={bebidasTotal}
+              clientInfo={clientInfo ?? null}
+              pointsEarned={pointsEarned}
+              onBack={() => setPayingTable(null)}
+              onCancelOrder={handleCancelOrder}
+            />
           </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowOpenCashDialog(false)}>Cancelar</Button>
-            <Button
-              className="bg-green-600 hover:bg-green-700 text-white"
-              disabled={cashSessionLoading || !openingCashInput}
-              onClick={async () => {
-                setCashSessionLoading(true)
-                try {
-                  const res = await fetch('/api/cash-sessions', {
-                    method: 'POST',
-                    headers: authHeaders(),
-                    body: JSON.stringify({ openingCash: parseFloat(openingCashInput) }),
-                  })
-                  if (handleFetchResponse(res) && res.ok) {
-                    toast.success('Caja abierta correctamente')
-                    setShowOpenCashDialog(false)
-                    setOpeningCashInput('')
-                    fetchCashSession()
-                  } else {
-                    const err = await res.json()
-                    toast.error(err.error || 'Error al abrir caja')
-                  }
-                } catch {
-                  toast.error('Error de red')
-                } finally {
-                  setCashSessionLoading(false)
-                }
-              }}
-            >
-              Abrir Caja
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
-      {/* Close Cash Dialog */}
-      <Dialog open={showCloseCashDialog} onOpenChange={setShowCloseCashDialog}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Cerrar Caja</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <Label>Efectivo contado (€)</Label>
-              <Input
-                type="number"
-                step="0.01"
-                placeholder="0.00"
-                value={closingCashInput}
-                onChange={(e) => setClosingCashInput(e.target.value)}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>Tarjeta contabilizada (€)</Label>
-              <Input
-                type="number"
-                step="0.01"
-                placeholder="0.00"
-                value={closingCardInput}
-                onChange={(e) => setClosingCardInput(e.target.value)}
-              />
-            </div>
+          {/* Payment Panel (fixed height) */}
+          <PaymentPanel
+            selectedPaymentMethod={selectedPaymentMethod}
+            onPaymentMethodChange={setSelectedPaymentMethod}
+            onCobrar={handleCobrar}
+            paying={paying}
+            total={total}
+            cashSession={cashSession}
+            selectedOrders={selectedOrders}
+            authHeaders={authHeaders}
+            mixtoEfectivo={mixtoEfectivo}
+            mixtoTarjeta={mixtoTarjeta}
+            onMixtoEfectivoChange={setMixtoEfectivo}
+            onMixtoTarjetaChange={setMixtoTarjeta}
+            onCancelOrder={handleCancelOrder}
+            onShowHistory={() => setShowHistory(true)}
+          />
+        </div>
+
+        {/* RIGHT COLUMN — Quick Products + Cash Summary */}
+        <div className="col-span-4 flex flex-col gap-3 min-h-0">
+          {/* Quick Products (takes most space) */}
+          <div className="flex-1 min-h-0">
+            <QuickProductsPanel
+              authHeaders={authHeaders}
+              handleFetchResponse={handleFetchResponse}
+            />
           </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowCloseCashDialog(false)}>Cancelar</Button>
-            <Button
-              variant="destructive"
-              disabled={cashSessionLoading || !closingCashInput}
-              onClick={async () => {
-                setCashSessionLoading(true)
-                try {
-                  const res = await fetch(`/api/cash-sessions/${cashSession.id}`, {
-                    method: 'PUT',
-                    headers: authHeaders(),
-                    body: JSON.stringify({
-                      closingCash: parseFloat(closingCashInput),
-                      closingCard: parseFloat(closingCardInput) || 0,
-                    }),
-                  })
-                  if (handleFetchResponse(res) && res.ok) {
-                    const data = await res.json()
-                    setCashCloseSummary(data.cashSession ?? data)
-                    toast.success('Caja cerrada correctamente')
-                    setShowCloseCashDialog(false)
-                    setClosingCashInput('')
-                    setClosingCardInput('')
-                    setCashSession(null)
-                    fetchCashSession()
-                  } else {
-                    let errorMsg = 'Error al cerrar caja'
-                    try {
-                      const err = await res.json()
-                      errorMsg = err.error || errorMsg
-                    } catch { /* not JSON */ }
-                    toast.error(errorMsg)
-                  }
-                } catch (err) {
-                  const msg = err instanceof Error ? err.message : 'Error de conexión'
-                  toast.error(msg)
-                } finally {
-                  setCashSessionLoading(false)
-                }
-              }}
-            >
-              Cerrar Caja
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
-      {/* Add Supplier Payment Dialog */}
-      <Dialog open={showSupplierDialog} onOpenChange={setShowSupplierDialog}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Pago a Proveedor</DialogTitle>
-            <DialogDescription>Registrar un pago a proveedor durante la sesión de caja actual</DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <Label>Concepto</Label>
-              <Input
-                placeholder="Ej: bebidas, pan, hielo..."
-                value={supplierConcept}
-                onChange={(e) => setSupplierConcept(e.target.value)}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>Monto (€)</Label>
-              <Input
-                type="number"
-                step="0.01"
-                placeholder="0.00"
-                value={supplierAmount}
-                onChange={(e) => setSupplierAmount(e.target.value)}
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowSupplierDialog(false)}>Cancelar</Button>
-            <Button
-              className="bg-orange-600 hover:bg-orange-700 text-white"
-              disabled={addingSupplier || !supplierConcept.trim() || !supplierAmount}
-              onClick={handleAddSupplier}
-            >
-              {addingSupplier ? 'Registrando...' : 'Registrar Pago'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <div className="flex items-center justify-between">
-        <h2 className="text-2xl font-bold tracking-tight">Caja</h2>
-        <Button variant="outline" size="sm" className="h-10" onClick={() => { fetchTables(); fetchActiveOrders() }}>
-          <ShoppingCart className="size-4 mr-1" />
-          Actualizar
-        </Button>
+          {/* Cash Summary (fixed height) */}
+          <CashSummaryPanel
+            cashSession={cashSession}
+            onOpenCash={() => setShowOpenCashDialog(true)}
+            onCloseCash={() => setShowCloseCashDialog(true)}
+            supplierPayments={supplierPayments}
+            onAddSupplier={() => setShowSupplierDialog(true)}
+          />
+        </div>
       </div>
 
-      {tablesByZone.length === 0 ? (
-        <Card className="rounded-xl">
-          <CardContent className="p-6">
-            <p className="text-muted-foreground">No hay mesas configuradas.</p>
-          </CardContent>
-        </Card>
-      ) : (
-        tablesByZone.map(({ zone, config: cfg, tables: zoneTables }) => (
-          <div key={zone}>
-            <div className="flex items-center gap-2 mb-3">
-              {cfg?.icon ?? <CircleDot className="size-4" />}
-              <h3 className="font-semibold text-lg">{cfg?.label ?? zone}</h3>
-            </div>
-            <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-8 gap-3">
-              {zoneTables.map((table) => {
-                const tableOrders = getTableOrders(table.id)
-                const isAvailable = table.status === 'available'
-                const isOccupied = table.status === 'occupied'
-                const isReady = hasReadyOrders(table.id)
-                const orderTotal = tableOrders.reduce((s, o) => s + (o.subtotal ?? o.total), 0)
-                const itemCount = tableOrders.reduce((s, o) => s + o.items.length, 0)
+      {/* BOTTOM — Calculator */}
+      <div className="shrink-0">
+        <Calculator />
+      </div>
 
-                return (
-                  <button
-                    key={table.id}
-                    className={`relative flex flex-col items-center justify-center p-4 rounded-xl border-2 transition-all min-h-[120px] ${
-                      isReady
-                        ? 'bg-amber-50 border-amber-400 hover:bg-amber-100 animate-pulse'
-                        : isAvailable
-                        ? 'bg-green-50 border-green-300 opacity-60'
-                        : isOccupied
-                        ? 'bg-orange-50 border-orange-300 hover:bg-orange-100 hover:border-orange-500'
-                        : 'bg-gray-50 border-gray-300'
-                    }`}
-                    onClick={() => !isAvailable && setPayingTable(table.id)}
-                    disabled={isAvailable}
-                  >
-                    {isReady && (
-                      <div className="absolute -top-1 -right-1 flex size-5 items-center justify-center rounded-full bg-amber-500 text-white text-xs">
-                        !
-                      </div>
-                    )}
-                    <span className="text-3xl font-bold">{table.number}</span>
-                    {isAvailable ? (
-                      <span className="text-xs text-green-600 mt-1">Libre</span>
-                    ) : (
-                      <>
-                        <span className="text-xs mt-1">
-                          {isReady ? '🟢 ¡Listo!' : '🔴 Ocupada'}
-                        </span>
-                        {itemCount > 0 && (
-                          <span className="text-xs font-semibold text-amber-800 mt-0.5">
-                            {itemCount} items · {formatEUR(orderTotal)}
-                          </span>
-                        )}
-                      </>
-                    )}
-                  </button>
-                )
-              })}
-            </div>
-          </div>
-        ))
-      )}
+      {/* ─── Dialogs ──────────────────────────────────────────── */}
+      <CashSessionDialogs
+        showOpenCashDialog={showOpenCashDialog}
+        setShowOpenCashDialog={setShowOpenCashDialog}
+        showCloseCashDialog={showCloseCashDialog}
+        setShowCloseCashDialog={setShowCloseCashDialog}
+        showSupplierDialog={showSupplierDialog}
+        setShowSupplierDialog={setShowSupplierDialog}
+        openingCashInput={openingCashInput}
+        setOpeningCashInput={setOpeningCashInput}
+        closingCashInput={closingCashInput}
+        setClosingCashInput={setClosingCashInput}
+        closingCardInput={closingCardInput}
+        setClosingCardInput={setClosingCardInput}
+        supplierConcept={supplierConcept}
+        setSupplierConcept={setSupplierConcept}
+        supplierAmount={supplierAmount}
+        setSupplierAmount={setSupplierAmount}
+        cashSessionLoading={cashSessionLoading}
+        cashSession={cashSession}
+        cashCloseSummary={cashCloseSummary}
+        setCashCloseSummary={setCashCloseSummary}
+        addingSupplier={addingSupplier}
+        onOpenCash={handleOpenCash}
+        onCloseCash={handleCloseCash}
+        onAddSupplier={handleAddSupplier}
+      />
     </div>
   )
 }
