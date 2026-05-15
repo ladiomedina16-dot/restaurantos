@@ -9,11 +9,12 @@ import { formatEUR, formatTime } from '@/lib/formatters'
 
 // ─── Sub-components ──────────────────────────────────────────────────────────
 import { TablesPanel } from '@/components/caja/tables-panel'
-import { OrderDetailPanel } from '@/components/caja/order-detail-panel'
-import { PaymentPanel, type PaymentMethod } from '@/components/caja/payment-panel'
+import { CashDashboard } from '@/components/caja/order-detail-panel'
+import { type PaymentMethod } from '@/components/caja/payment-panel'
 import { QuickProductsPanel } from '@/components/caja/quick-products-panel'
 import { CashSummaryPanel } from '@/components/caja/cash-summary-panel'
 import { CashSessionDialogs } from '@/components/caja/cash-session-dialogs'
+import { TablePaymentDialog } from '@/components/caja/table-payment-dialog'
 import { Calculator } from '@/components/caja/calculator'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
@@ -57,6 +58,9 @@ export function CajaTab() {
 
   // ─── Calculator Dialog State (PRESERVED) ───────────────────
   const [showCalculator, setShowCalculator] = useState(false)
+
+  // ─── Payment Dialog State ─────────────────────────────────────
+  const [showPaymentDialog, setShowPaymentDialog] = useState(false)
 
   // ─── Fetch Callbacks (PRESERVED EXACTLY) ───────────────────
   const fetchTables = useCallback(async () => {
@@ -155,6 +159,13 @@ export function CajaTab() {
 
   const clientInfo = selectedOrders.find((o) => o.client)?.client
 
+  // ─── Dashboard Stats ─────────────────────────────────────────
+  const occupiedTablesCount = tables.filter((t) => t.status === 'occupied').length
+  const activeOrdersCount = orders.filter((o) => !['paid', 'cancelled'].includes(o.status)).length
+  const totalPending = orders
+    .filter((o) => !['paid', 'cancelled'].includes(o.status))
+    .reduce((sum, o) => sum + (o.subtotal ?? o.total), 0)
+
   const handleCobrar = async () => {
     if (!selectedTableId || selectedOrders.length === 0) return
     if (!cashSession) {
@@ -178,6 +189,7 @@ export function CajaTab() {
       }
       toast.success(`Mesa ${selectedTable?.number ?? '?'} cobrada — ${formatEUR(total)}`)
       setPayingTable(null)
+      setShowPaymentDialog(false)
       setSelectedPaymentMethod('efectivo')
       setMixtoEfectivo('')
       setMixtoTarjeta('')
@@ -374,7 +386,10 @@ export function CajaTab() {
             tables={tables}
             orders={orders}
             selectedTableId={selectedTableId}
-            onSelectTable={setPayingTable}
+            onSelectTable={(tableId) => {
+              setPayingTable(tableId)
+              setShowPaymentDialog(true)
+            }}
             onRefresh={() => { fetchTables(); fetchActiveOrders() }}
             getTableOrders={getTableOrders}
             hasReadyOrders={hasReadyOrders}
@@ -382,35 +397,14 @@ export function CajaTab() {
           />
         </div>
 
-        {/* CENTER: Order Detail + Payment Methods + COBRAR */}
-        <div className="min-h-0 flex flex-col">
-          <div className="flex-1 min-h-0">
-            <OrderDetailPanel
-              selectedTable={selectedTable ? { id: selectedTable.id, number: selectedTable.number, zone: selectedTable.zone } : undefined}
-              selectedOrders={selectedOrders}
-              allItems={allItems}
-              subtotal={subtotal}
-              finalDiscount={finalDiscount}
-              total={total}
-              hasClient={hasClient}
-              freeDrinks={freeDrinks}
-              bebidasTotal={bebidasTotal}
-              clientInfo={clientInfo ?? null}
-              pointsEarned={pointsEarned}
-              onBack={() => setPayingTable(null)}
-              onCancelOrder={handleCancelOrder}
-              selectedPaymentMethod={selectedPaymentMethod}
-              onPaymentMethodChange={setSelectedPaymentMethod}
-              mixtoEfectivo={mixtoEfectivo}
-              mixtoTarjeta={mixtoTarjeta}
-              onMixtoEfectivoChange={setMixtoEfectivo}
-              onMixtoTarjetaChange={setMixtoTarjeta}
-              onCobrar={handleCobrar}
-              paying={paying}
-              cashSession={cashSession}
-              authHeaders={authHeaders}
-            />
-          </div>
+        {/* CENTER: Dashboard / Resumen de Caja */}
+        <div className="min-h-0">
+          <CashDashboard
+            cashSession={cashSession}
+            occupiedTablesCount={occupiedTablesCount}
+            activeOrdersCount={activeOrdersCount}
+            totalPending={totalPending}
+          />
         </div>
 
         {/* RIGHT: Products + Cash Info */}
@@ -431,17 +425,6 @@ export function CajaTab() {
         </div>
       </div>
 
-      {/* ─── Bottom Action Bar ──────────────────────────────── */}
-      <div className="bg-white border-t border-gray-200 px-4 py-2 flex items-center gap-2 shrink-0 rounded-b-lg">
-        <PaymentPanel
-          onCancelOrder={handleCancelOrder}
-          selectedOrders={selectedOrders}
-          authHeaders={authHeaders}
-          onShowHistory={() => setShowHistory(true)}
-          onShowCalculator={() => setShowCalculator(true)}
-        />
-      </div>
-
       {/* ─── Calculator Dialog ──────────────────────────────── */}
       <Dialog open={showCalculator} onOpenChange={setShowCalculator}>
         <DialogContent className="sm:max-w-sm bg-white border-gray-200 p-4 gap-2">
@@ -451,6 +434,35 @@ export function CajaTab() {
           <Calculator />
         </DialogContent>
       </Dialog>
+
+      {/* ─── Table Payment Dialog ───────────────────────────── */}
+      <TablePaymentDialog
+        open={showPaymentDialog}
+        onOpenChange={setShowPaymentDialog}
+        selectedTable={selectedTable ? { id: selectedTable.id, number: selectedTable.number, zone: selectedTable.zone } : undefined}
+        selectedOrders={selectedOrders}
+        allItems={allItems}
+        subtotal={subtotal}
+        finalDiscount={finalDiscount}
+        total={total}
+        hasClient={hasClient}
+        freeDrinks={freeDrinks}
+        bebidasTotal={bebidasTotal}
+        clientInfo={clientInfo ?? null}
+        pointsEarned={pointsEarned}
+        selectedPaymentMethod={selectedPaymentMethod}
+        onPaymentMethodChange={setSelectedPaymentMethod}
+        mixtoEfectivo={mixtoEfectivo}
+        mixtoTarjeta={mixtoTarjeta}
+        onMixtoEfectivoChange={setMixtoEfectivo}
+        onMixtoTarjetaChange={setMixtoTarjeta}
+        onCobrar={handleCobrar}
+        paying={paying}
+        cashSession={cashSession}
+        authHeaders={authHeaders}
+        onCancelOrder={handleCancelOrder}
+        onShowCalculator={() => setShowCalculator(true)}
+      />
 
       {/* ─── Cash Session Dialogs ───────────────────────────── */}
       <CashSessionDialogs
