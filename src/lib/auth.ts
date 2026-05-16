@@ -127,10 +127,9 @@ export const ROLE_PERMISSIONS: Record<UserRole, string[]> = {
     'clients:read', 'clients:create', 'clients:update', 'clients:delete',
     'users:read', 'users:create', 'users:update', 'users:delete',
     'payments:read', 'dashboard:read',
-    'cash:read', 'cash:open', 'cash:close',
+    'cash:read', 'cash:open', 'cash:close', 'cash:status',
     'print:read',
     'audit:read',
-    'bill:request',
   ],
   encargado: [
     'orders:read', 'orders:create', 'orders:update', 'orders:pay',
@@ -139,18 +138,17 @@ export const ROLE_PERMISSIONS: Record<UserRole, string[]> = {
     'clients:read', 'clients:create', 'clients:update',
     'users:read',
     'payments:read', 'dashboard:read',
-    'cash:read', 'cash:open', 'cash:close',
+    'cash:read', 'cash:open', 'cash:close', 'cash:status',
     'print:read',
     'audit:read',
-    'bill:request',
   ],
   camarero: [
     'orders:read', 'orders:create',
     'products:read',
     'tables:read',
     'clients:read', 'clients:create',
+    'cash:status',
     'print:read',
-    'bill:request',
   ],
   cocina: [
     'orders:read', 'orders:update', // can mark orders as ready
@@ -168,7 +166,7 @@ export const ROLE_PERMISSIONS: Record<UserRole, string[]> = {
     'tables:read',
     'clients:read',
     'payments:read',
-    'cash:read', 'cash:open', 'cash:close',
+    'cash:read', 'cash:open', 'cash:close', 'cash:status',
     'print:read',
   ],
 }
@@ -337,6 +335,44 @@ export function requireRestaurantScope(user: JwtPayload, request: Request): { re
   }
 
   return { restaurantId: user.restaurantId }
+}
+
+/**
+ * Cash Session Guard: Check if the restaurant has an open cash session.
+ * Returns { cashSession } if open, or an error NextResponse if not.
+ * Used to block order creation/modification when caja is closed.
+ */
+export async function requireOpenCashSession(
+  restaurantId: string
+): Promise<{ cashSession: { id: string; openedAt: Date } } | { error: NextResponse }> {
+  try {
+    const cashSession = await db.cashSession.findFirst({
+      where: {
+        restaurantId,
+        status: 'open',
+      },
+      select: { id: true, openedAt: true },
+    })
+
+    if (!cashSession) {
+      return {
+        error: NextResponse.json(
+          { error: 'No se pueden tomar pedidos porque la caja está cerrada.' },
+          { status: 403 }
+        ),
+      }
+    }
+
+    return { cashSession }
+  } catch (error) {
+    console.error('[AUTH] Error checking cash session:', error)
+    return {
+      error: NextResponse.json(
+        { error: 'Error al verificar la sesión de caja.' },
+        { status: 500 }
+      ),
+    }
+  }
 }
 
 /**

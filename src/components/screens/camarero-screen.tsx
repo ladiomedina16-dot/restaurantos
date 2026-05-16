@@ -146,17 +146,20 @@ export function CamareroTab() {  const {
 
   const fetchCashSession = useCallback(async () => {
     try {
-      const res = await fetch('/api/cash-sessions?current=true', { headers: authHeaders(false) })
-      if (handleFetchResponse(res) && res.ok) {
+      const res = await fetch('/api/cash-sessions/status', {
+        headers: authHeaders(false),
+        cache: 'no-store',
+      })
+      if (res.ok) {
         const json = await res.json()
-        setCashSessionOpen(!!json.cashSession)
+        setCashSessionOpen(Boolean(json.open))
       } else {
         setCashSessionOpen(false)
       }
     } catch {
       setCashSessionOpen(false)
     }
-  }, [authHeaders, handleFetchResponse])
+  }, [authHeaders])
 
   useEffect(() => {
     const load = async () => {
