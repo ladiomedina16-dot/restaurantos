@@ -142,14 +142,15 @@ export const ROLE_PERMISSIONS: Record<UserRole, string[]> = {
     'print:read',
     'audit:read',
   ],
-  camarero: [
-    'orders:read', 'orders:create',
-    'products:read',
-    'tables:read',
-    'clients:read', 'clients:create',
-    'cash:status',
-    'print:read',
-  ],
+ camarero: [
+  'orders:read', 'orders:create',
+  'bill:request',
+  'products:read',
+  'tables:read',
+  'clients:read', 'clients:create',
+  'cash:status',
+  'print:read',
+],
   cocina: [
     'orders:read', 'orders:update', // can mark orders as ready
     'products:read',
