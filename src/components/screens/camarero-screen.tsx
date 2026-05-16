@@ -14,6 +14,7 @@ import {
   ShoppingCart,
   Receipt,
   CircleDot,
+  Lock,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -50,8 +51,7 @@ import { useAuth } from '@/components/common/auth-context'
 
 // ─── CAMARERO TAB ───────────────────────────────────────────────────────────
 
-export function CamareroTab() {
-  const {
+export function CamareroTab() {  const {
     currentOrderItems,
     addOrderItem,
     removeOrderItem,
@@ -65,6 +65,7 @@ export function CamareroTab() {
   const [products, setProducts] = useState<Product[]>([])
   const [clients, setClients] = useState<Client[]>([])
   const [loading, setLoading] = useState(true)
+  const [cashSessionOpen, setCashSessionOpen] = useState<boolean | null>(null) // null = loading
 
   // Flow state: 'tables' | 'menu'
   const [view, setView] = useState<'tables' | 'menu'>('tables')
@@ -143,15 +144,32 @@ export function CamareroTab() {
     }
   }, [authHeaders, handleFetchResponse])
 
+  const fetchCashSession = useCallback(async () => {
+    try {
+      const res = await fetch('/api/cash-sessions?current=true', { headers: authHeaders(false) })
+      if (handleFetchResponse(res) && res.ok) {
+        const json = await res.json()
+        setCashSessionOpen(!!json.cashSession)
+      } else {
+        setCashSessionOpen(false)
+      }
+    } catch {
+      setCashSessionOpen(false)
+    }
+  }, [authHeaders, handleFetchResponse])
+
   useEffect(() => {
     const load = async () => {
-      await Promise.all([fetchTables(), fetchProducts()])
+      await Promise.all([fetchTables(), fetchProducts(), fetchCashSession()])
       setLoading(false)
     }
     load()
-    const interval = setInterval(fetchTables, 8000)
+    const interval = setInterval(() => {
+      fetchTables()
+      fetchCashSession()
+    }, 8000)
     return () => clearInterval(interval)
-  }, [fetchTables, fetchProducts])
+  }, [fetchTables, fetchProducts, fetchCashSession])
 
   // Polling: tables refresh via interval (Vercel-compatible, no Socket.io)
 
@@ -163,6 +181,10 @@ export function CamareroTab() {
   }
 
   const handleAddProduct = (product: Product) => {
+    if (!cashSessionOpen) {
+      toast.error('Caja cerrada. No se pueden tomar pedidos.')
+      return
+    }
     addOrderItem({
       productId: product.id,
       name: product.name,
@@ -177,6 +199,10 @@ export function CamareroTab() {
 
   const handleEnviarCocina = async () => {
     if (!selectedTable) return
+    if (!cashSessionOpen) {
+      toast.error('Caja cerrada. No se pueden tomar pedidos.')
+      return
+    }
     if (currentOrderItems.length === 0) {
       toast.error('Añade al menos un producto')
       return
@@ -226,6 +252,10 @@ export function CamareroTab() {
   // Request bill: mark table as bill_requested (blocks further orders)
   const [requestingBill, setRequestingBill] = useState(false)
   const handleRequestBill = async (table: TableItem) => {
+    if (!cashSessionOpen) {
+      toast.error('Caja cerrada. No se puede pedir la cuenta.')
+      return
+    }
     setRequestingBill(true)
     try {
       const res = await fetch(`/api/tables/${table.id}/request-bill`, {
@@ -340,9 +370,10 @@ export function CamareroTab() {
             {isOccupied && (
               <Button
                 size="sm"
-                className="h-10 bg-amber-600 hover:bg-amber-700 text-white"
+                className="h-10 bg-amber-600 hover:bg-amber-700 text-white disabled:opacity-50 disabled:cursor-not-allowed"
                 onClick={() => handleRequestBill(selectedTable)}
-                disabled={requestingBill}
+                disabled={requestingBill || !cashSessionOpen}
+                title={!cashSessionOpen ? 'La caja está cerrada' : undefined}
               >
                 <Receipt className="size-4 mr-1" />
                 {requestingBill ? 'Solicitando...' : 'Pedir cuenta'}
@@ -360,6 +391,17 @@ export function CamareroTab() {
             </Button>
           </div>
         </div>
+
+        {/* Cash closed banner */}
+        {cashSessionOpen === false && (
+          <div className="flex items-center gap-2 p-3 rounded-none bg-red-50 border-b border-red-200 text-red-800">
+            <Lock className="size-5 shrink-0" />
+            <div>
+              <p className="font-semibold text-sm">Caja cerrada</p>
+              <p className="text-xs text-red-600">No se pueden tomar pedidos ni pedir cuenta hasta que se abra la caja.</p>
+            </div>
+          </div>
+        )}
 
         {/* Bill requested warning banner */}
         {isBillRequested && (
@@ -535,8 +577,10 @@ export function CamareroTab() {
                 return (
                   <button
                     key={product.id}
-                    className="relative flex flex-col items-center justify-center p-4 rounded-xl border-2 bg-white hover:bg-amber-50 hover:border-amber-400 transition-all min-h-[90px] sm:min-h-[100px] active:scale-95"
-                    onClick={() => handleAddProduct(product)}
+                    className={`relative flex flex-col items-center justify-center p-4 rounded-xl border-2 bg-white transition-all min-h-[90px] sm:min-h-[100px] ${!cashSessionOpen ? 'opacity-50 cursor-not-allowed border-gray-200' : 'hover:bg-amber-50 hover:border-amber-400 active:scale-95'}`}
+                    onClick={() => cashSessionOpen && handleAddProduct(product)}
+                    disabled={!cashSessionOpen}
+                    title={!cashSessionOpen ? 'La caja está cerrada' : undefined}
                   >
                     {inOrder && (
                       <div className="absolute -top-2 -right-2 flex size-7 items-center justify-center rounded-full bg-amber-600 text-white text-sm font-bold shadow">
@@ -617,9 +661,10 @@ export function CamareroTab() {
                   Limpiar
                 </Button>
                 <Button
-                  className="h-12 sm:h-12 bg-amber-600 hover:bg-amber-700 text-white text-sm sm:text-base font-bold px-4 sm:px-6 sm:flex-1"
+                  className="h-12 sm:h-12 bg-amber-600 hover:bg-amber-700 text-white text-sm sm:text-base font-bold px-4 sm:px-6 sm:flex-1 disabled:opacity-50 disabled:cursor-not-allowed"
                   onClick={handleEnviarCocina}
-                  disabled={sending}
+                  disabled={sending || !cashSessionOpen}
+                  title={!cashSessionOpen ? 'La caja está cerrada' : undefined}
                 >
                   <Flame className="size-4 sm:size-5 mr-1 sm:mr-2" />
                   {sending ? 'Enviando...' : 'Enviar'}
@@ -680,6 +725,16 @@ export function CamareroTab() {
   // ─── Table Selection View ────────────────────────────────────
   return (
     <div className="space-y-4">
+      {/* Cash closed banner */}
+      {cashSessionOpen === false && (
+        <div className="flex items-center gap-2 p-3 rounded-xl bg-red-50 border border-red-200 text-red-800">
+          <Lock className="size-5 shrink-0" />
+          <div>
+            <p className="font-semibold text-sm">Caja cerrada</p>
+            <p className="text-xs text-red-600">No se pueden tomar pedidos ni pedir cuenta hasta que se abra la caja.</p>
+          </div>
+        </div>
+      )}
       <div className="flex items-center justify-between flex-wrap gap-2">
         <h2 className="text-2xl font-bold tracking-tight">Camarero</h2>
         <div className="flex items-center gap-2">
@@ -744,9 +799,10 @@ export function CamareroTab() {
                     )}
                     {isOccupied && (
                       <button
-                        className="mt-1 px-3 py-1 bg-amber-600 text-white text-xs font-bold rounded-full active:scale-95"
+                        className="mt-1 px-3 py-1 bg-amber-600 text-white text-xs font-bold rounded-full active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
                         onClick={(e) => { e.stopPropagation(); handleRequestBill(table) }}
-                        disabled={requestingBill}
+                        disabled={requestingBill || !cashSessionOpen}
+                        title={!cashSessionOpen ? 'La caja está cerrada' : undefined}
                       >
                         <Receipt className="size-3 inline mr-0.5" /> {requestingBill ? 'Solicitando...' : 'Pedir cuenta'}
                       </button>
@@ -761,3 +817,6 @@ export function CamareroTab() {
     </div>
   )
 }
+
+// Re-export with legacy name for backward compatibility
+export { CamareroTab as CamareroScreen }
