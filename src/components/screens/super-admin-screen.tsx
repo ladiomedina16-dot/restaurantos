@@ -15,8 +15,10 @@ import {
   Shield,
   ShieldOff,
   Eye,
+  EyeOff,
   Trash2,
   UserCircle,
+  KeyRound,
 } from 'lucide-react'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { Button } from '@/components/ui/button'
@@ -68,6 +70,76 @@ export function SuperAdminPanel() {
   const [blockLoading, setBlockLoading] = useState<string | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<RestaurantItem | null>(null)
   const [deleteLoading, setDeleteLoading] = useState(false)
+
+  // ─── Change own password (superadmin) ───────────────────────
+  const [showChangePasswordDialog, setShowChangePasswordDialog] = useState(false)
+  const [cpMode, setCpMode] = useState<'normal' | 'emergency'>('normal')
+  const [cpCurrentPassword, setCpCurrentPassword] = useState('')
+  const [cpNewPassword, setCpNewPassword] = useState('')
+  const [cpConfirmPassword, setCpConfirmPassword] = useState('')
+  const [cpShowCurrent, setCpShowCurrent] = useState(false)
+  const [cpShowNew, setCpShowNew] = useState(false)
+  const [cpShowConfirm, setCpShowConfirm] = useState(false)
+  const [cpLoading, setCpLoading] = useState(false)
+  const [cpError, setCpError] = useState('')
+  const [cpSuccess, setCpSuccess] = useState(false)
+
+  const resetCpForm = () => {
+    setCpCurrentPassword('')
+    setCpNewPassword('')
+    setCpConfirmPassword('')
+    setCpError('')
+    setCpSuccess(false)
+    setCpMode('normal')
+    setCpShowCurrent(false)
+    setCpShowNew(false)
+    setCpShowConfirm(false)
+  }
+
+  const handleChangePassword = async () => {
+    setCpError('')
+    if (cpNewPassword.length < 6) {
+      setCpError('La nueva contraseña debe tener al menos 6 caracteres.')
+      return
+    }
+    if (cpNewPassword !== cpConfirmPassword) {
+      setCpError('Las contraseñas no coinciden.')
+      return
+    }
+    if (cpMode === 'normal' && !cpCurrentPassword) {
+      setCpError('Introduce tu contraseña actual.')
+      return
+    }
+
+    setCpLoading(true)
+    try {
+      const res = await fetch('/api/users/change-password', {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify({
+          currentPassword: cpMode === 'normal' ? cpCurrentPassword : cpNewPassword, // emergency: skip verification
+          newPassword: cpNewPassword,
+          ...(cpMode === 'emergency' && { skipCurrentPassword: true }),
+        }),
+      })
+      const data = await res.json()
+      if (res.ok) {
+        setCpSuccess(true)
+        toast.success('Contraseña cambiada correctamente')
+        setTimeout(() => {
+          setShowChangePasswordDialog(false)
+          resetCpForm()
+        }, 1500)
+      } else {
+        setCpError(data.error || 'Error al cambiar la contraseña.')
+      }
+    } catch {
+      setCpError('Error de red. Inténtalo de nuevo.')
+    } finally {
+      setCpLoading(false)
+    }
+  }
+
 
   const fetchRestaurants = useCallback(async () => {
     if (!authToken) return
@@ -277,10 +349,20 @@ export function SuperAdminPanel() {
             {restaurants.length} restaurante{restaurants.length !== 1 ? 's' : ''} registrados
           </p>
         </div>
-        <Button onClick={() => setShowOnboardingDialog(true)} className="bg-amber-600 hover:bg-amber-700 text-white gap-2">
-          <Plus className="size-4" />
-          Crear Restaurante
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            onClick={() => { resetCpForm(); setShowChangePasswordDialog(true) }}
+            className="gap-2"
+          >
+            <KeyRound className="size-4" />
+            Mi contraseña
+          </Button>
+          <Button onClick={() => setShowOnboardingDialog(true)} className="bg-amber-600 hover:bg-amber-700 text-white gap-2">
+            <Plus className="size-4" />
+            Crear Restaurante
+          </Button>
+        </div>
       </div>
 
       {/* Restaurant List */}
@@ -477,6 +559,129 @@ export function SuperAdminPanel() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* ─── Change My Password Dialog ─────────────────────── */}
+      <Dialog open={showChangePasswordDialog} onOpenChange={(open) => { if (!open) resetCpForm(); setShowChangePasswordDialog(open) }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <KeyRound className="size-5 text-amber-600" />
+              Cambiar mi contraseña
+            </DialogTitle>
+            <DialogDescription>
+              Modifica la contraseña de la cuenta <strong>superadmin</strong>
+            </DialogDescription>
+          </DialogHeader>
+
+          {/* Mode selector */}
+          <div className="flex gap-2 p-1 bg-muted rounded-lg">
+            <button
+              onClick={() => { setCpMode('normal'); setCpError('') }}
+              className={`flex-1 py-1.5 px-3 rounded-md text-sm font-medium transition-colors ${cpMode === 'normal' ? 'bg-background shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+            >
+              Conozco mi clave actual
+            </button>
+            <button
+              onClick={() => { setCpMode('emergency'); setCpError('') }}
+              className={`flex-1 py-1.5 px-3 rounded-md text-sm font-medium transition-colors ${cpMode === 'emergency' ? 'bg-background shadow-sm text-red-600' : 'text-muted-foreground hover:text-foreground'}`}
+            >
+              Olvidé mi clave
+            </button>
+          </div>
+
+          {cpMode === 'emergency' && (
+            <div className="flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800">
+              <span>⚠️</span>
+              <span>Modo de emergencia: no se verificará la contraseña actual. Solo disponible porque estás dentro de la sesión activa.</span>
+            </div>
+          )}
+
+          <div className="space-y-4">
+            {cpMode === 'normal' && (
+              <div className="space-y-2">
+                <Label>Contraseña actual</Label>
+                <div className="relative">
+                  <Input
+                    type={cpShowCurrent ? 'text' : 'password'}
+                    placeholder="Tu contraseña actual"
+                    value={cpCurrentPassword}
+                    onChange={(e) => setCpCurrentPassword(e.target.value)}
+                    className="pr-10"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setCpShowCurrent(!cpShowCurrent)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  >
+                    {cpShowCurrent ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            <div className="space-y-2">
+              <Label>Nueva contraseña</Label>
+              <div className="relative">
+                <Input
+                  type={cpShowNew ? 'text' : 'password'}
+                  placeholder="Mínimo 6 caracteres"
+                  value={cpNewPassword}
+                  onChange={(e) => setCpNewPassword(e.target.value)}
+                  className="pr-10"
+                />
+                <button
+                  type="button"
+                  onClick={() => setCpShowNew(!cpShowNew)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                >
+                  {cpShowNew ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                </button>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Confirmar nueva contraseña</Label>
+              <div className="relative">
+                <Input
+                  type={cpShowConfirm ? 'text' : 'password'}
+                  placeholder="Repite la nueva contraseña"
+                  value={cpConfirmPassword}
+                  onChange={(e) => setCpConfirmPassword(e.target.value)}
+                  className="pr-10"
+                  onKeyDown={(e) => { if (e.key === 'Enter') handleChangePassword() }}
+                />
+                <button
+                  type="button"
+                  onClick={() => setCpShowConfirm(!cpShowConfirm)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                >
+                  {cpShowConfirm ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                </button>
+              </div>
+            </div>
+
+            {cpError && (
+              <p className="text-sm text-red-600 text-center">{cpError}</p>
+            )}
+            {cpSuccess && (
+              <p className="text-sm text-green-600 text-center font-medium">✅ Contraseña cambiada correctamente</p>
+            )}
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setShowChangePasswordDialog(false); resetCpForm() }}>
+              Cancelar
+            </Button>
+            <Button
+              className={cpMode === 'emergency' ? 'bg-amber-600 hover:bg-amber-700 text-white' : 'bg-amber-600 hover:bg-amber-700 text-white'}
+              disabled={cpLoading || cpSuccess || !cpNewPassword || !cpConfirmPassword || (cpMode === 'normal' && !cpCurrentPassword)}
+              onClick={handleChangePassword}
+            >
+              {cpLoading ? 'Guardando...' : 'Cambiar contraseña'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

@@ -24,7 +24,18 @@ export async function POST(request: Request) {
     const validation = validateInput(changePasswordSchema, body)
     if (!validation.success) return validation.error
 
-    const { currentPassword, newPassword } = validation.data
+    const { currentPassword, newPassword, skipCurrentPassword } = validation.data
+
+    // Skip current password check if emergency mode AND user is super_admin
+    const isEmergency = skipCurrentPassword === true && user.role === 'super_admin'
+
+    // In normal mode, currentPassword is required
+    if (!isEmergency && !currentPassword) {
+      return NextResponse.json(
+        { error: 'La contraseña actual es obligatoria.' },
+        { status: 400 }
+      )
+    }
 
     // Fetch current password hash
     const dbUser = await db.user.findUnique({
@@ -39,13 +50,15 @@ export async function POST(request: Request) {
       )
     }
 
-    // Verify current password
-    const valid = await verifyPassword(currentPassword, dbUser.passwordHash)
-    if (!valid) {
-      return NextResponse.json(
-        { error: 'Contraseña actual incorrecta.' },
-        { status: 400 }
-      )
+    if (!isEmergency) {
+      // Verify current password
+      const valid = await verifyPassword(currentPassword, dbUser.passwordHash)
+      if (!valid) {
+        return NextResponse.json(
+          { error: 'Contraseña actual incorrecta.' },
+          { status: 400 }
+        )
+      }
     }
 
     // Hash new password

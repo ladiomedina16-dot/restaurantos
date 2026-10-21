@@ -237,8 +237,9 @@ export const updateSettingsSchema = z.object({
   // ─── Change Password ───────────────────────────────────────
 
   export const changePasswordSchema = z.object({
-    currentPassword: z.string().min(1, 'Contraseña actual obligatoria'),
+    currentPassword: z.string().max(200).optional().default(''),
     newPassword: z.string().min(6, 'Mínimo 6 caracteres').max(100),
+    skipCurrentPassword: z.boolean().optional().default(false),
   })
 
   // ─── Reset Password (admin) ────────────────────────────────
