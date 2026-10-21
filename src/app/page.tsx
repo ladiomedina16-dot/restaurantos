@@ -20,6 +20,9 @@ import {
   LogOut,
   Lock,
   FileText,
+  KeyRound,
+  Eye,
+  EyeOff,
 } from 'lucide-react'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { Button } from '@/components/ui/button'
@@ -31,6 +34,7 @@ import {
   DialogHeader,
   DialogTitle,
   DialogFooter,
+  DialogDescription,
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -80,6 +84,18 @@ export default function RestaurantPage() {
   const [changePasswordConfirm, setChangePasswordConfirm] = useState('')
   const [changePasswordLoading, setChangePasswordLoading] = useState(false)
   const [changePasswordError, setChangePasswordError] = useState('')
+
+  // ─── Forgot Password State (Restaurant users) ────────────────
+  const [showForgotPasswordDialog, setShowForgotPasswordDialog] = useState(false)
+  const [forgotSlug, setForgotSlug] = useState('')
+  const [forgotUsername, setForgotUsername] = useState('')
+  const [forgotNewPassword, setForgotNewPassword] = useState('')
+  const [forgotConfirmPassword, setForgotConfirmPassword] = useState('')
+  const [forgotShowNew, setForgotShowNew] = useState(false)
+  const [forgotShowConfirm, setForgotShowConfirm] = useState(false)
+  const [forgotLoading, setForgotLoading] = useState(false)
+  const [forgotError, setForgotError] = useState('')
+  const [forgotSuccess, setForgotSuccess] = useState('')
 
   // ─── SaaS Subscription State ────────────────────────────────
   const [subscriptionSuspended, setSubscriptionSuspended] = useState(false)
@@ -233,6 +249,63 @@ export default function RestaurantPage() {
     }
   }
 
+  const handleForgotPassword = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setForgotError('')
+    setForgotSuccess('')
+
+    if (!forgotSlug.trim()) {
+      setForgotError('Introduce el slug o identificador del restaurante.')
+      return
+    }
+    if (!forgotUsername.trim()) {
+      setForgotError('Introduce tu nombre de usuario.')
+      return
+    }
+    if (forgotNewPassword.length < 6) {
+      setForgotError('La nueva contraseña debe tener al menos 6 caracteres.')
+      return
+    }
+    if (forgotNewPassword !== forgotConfirmPassword) {
+      setForgotError('Las contraseñas no coinciden.')
+      return
+    }
+
+    setForgotLoading(true)
+    try {
+      const res = await fetch('/api/auth/forgot-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          restaurantSlug: forgotSlug.trim(),
+          username: forgotUsername.trim(),
+          newPassword: forgotNewPassword,
+        }),
+      })
+      const data = await res.json()
+      if (res.ok) {
+        setForgotSuccess(data.message || 'Contraseña actualizada correctamente.')
+        toast.success('Contraseña restablecida')
+        setTimeout(() => {
+          setShowForgotPasswordDialog(false)
+          setLoginUsername(forgotUsername.trim())
+          setLoginPassword('')
+          setForgotSlug('')
+          setForgotUsername('')
+          setForgotNewPassword('')
+          setForgotConfirmPassword('')
+          setForgotSuccess('')
+        }, 2000)
+      } else {
+        setForgotError(data.error || 'Error al restablecer la contraseña.')
+      }
+    } catch {
+      setForgotError('Error de red. Inténtalo de nuevo.')
+    } finally {
+      setForgotLoading(false)
+    }
+  }
+
   // Real-time status: always "connected" (polling mode, no Socket.io)
   useEffect(() => {
     if (!authToken) return
@@ -376,9 +449,140 @@ export default function RestaurantPage() {
               >
                 {loginLoading ? 'Entrando...' : 'Entrar'}
               </Button>
+
+              <div className="text-center pt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setForgotError('')
+                    setForgotSuccess('')
+                    setForgotSlug('')
+                    setForgotUsername(loginUsername || '')
+                    setForgotNewPassword('')
+                    setForgotConfirmPassword('')
+                    setShowForgotPasswordDialog(true)
+                  }}
+                  className="text-xs text-amber-700 hover:text-amber-800 hover:underline font-medium transition-colors cursor-pointer"
+                >
+                  ¿Olvidaste tu contraseña?
+                </button>
+              </div>
             </form>
           </CardContent>
         </Card>
+
+        {/* Dialog de Recuperación de Contraseña para Administradores / Usuarios */}
+        <Dialog open={showForgotPasswordDialog} onOpenChange={setShowForgotPasswordDialog}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2 text-amber-800">
+                <KeyRound className="size-5 text-amber-600" />
+                Recuperar Contraseña
+              </DialogTitle>
+              <DialogDescription>
+                Introduce el slug del restaurante, tu usuario y la nueva clave para restablecerla.
+              </DialogDescription>
+            </DialogHeader>
+
+            <form onSubmit={handleForgotPassword} className="space-y-4 pt-2">
+              <div className="space-y-2">
+                <Label htmlFor="forgot-slug">Slug o Código del Restaurante *</Label>
+                <Input
+                  id="forgot-slug"
+                  placeholder="ej: la-sevillana o la-bartola"
+                  value={forgotSlug}
+                  onChange={(e) => setForgotSlug(e.target.value.toLowerCase().replace(/\s+/g, '-'))}
+                  required
+                />
+                <p className="text-[11px] text-muted-foreground">
+                  Identificador del restaurante (ej: la-sevillana)
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="forgot-username">Nombre de Usuario *</Label>
+                <Input
+                  id="forgot-username"
+                  placeholder="ej: roberto carlos o admin"
+                  value={forgotUsername}
+                  onChange={(e) => setForgotUsername(e.target.value)}
+                  required
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="forgot-new-password">Nueva Contraseña *</Label>
+                <div className="relative">
+                  <Input
+                    id="forgot-new-password"
+                    type={forgotShowNew ? 'text' : 'password'}
+                    placeholder="Mínimo 6 caracteres"
+                    value={forgotNewPassword}
+                    onChange={(e) => setForgotNewPassword(e.target.value)}
+                    className="pr-10"
+                    required
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setForgotShowNew(!forgotShowNew)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground cursor-pointer"
+                  >
+                    {forgotShowNew ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                  </button>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="forgot-confirm-password">Confirmar Nueva Contraseña *</Label>
+                <div className="relative">
+                  <Input
+                    id="forgot-confirm-password"
+                    type={forgotShowConfirm ? 'text' : 'password'}
+                    placeholder="Repite la nueva contraseña"
+                    value={forgotConfirmPassword}
+                    onChange={(e) => setForgotConfirmPassword(e.target.value)}
+                    className="pr-10"
+                    required
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setForgotShowConfirm(!forgotShowConfirm)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground cursor-pointer"
+                  >
+                    {forgotShowConfirm ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                  </button>
+                </div>
+              </div>
+
+              {forgotError && (
+                <p className="text-sm text-red-600 text-center">{forgotError}</p>
+              )}
+
+              {forgotSuccess && (
+                <p className="text-sm text-green-600 text-center font-medium">
+                  ✅ {forgotSuccess}
+                </p>
+              )}
+
+              <DialogFooter className="gap-2 sm:gap-0 pt-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setShowForgotPasswordDialog(false)}
+                >
+                  Cancelar
+                </Button>
+                <Button
+                  type="submit"
+                  className="bg-amber-600 hover:bg-amber-700 text-white"
+                  disabled={forgotLoading || !!forgotSuccess}
+                >
+                  {forgotLoading ? 'Restableciendo...' : 'Restablecer Contraseña'}
+                </Button>
+              </DialogFooter>
+            </form>
+          </DialogContent>
+        </Dialog>
       </div>
     )
   }

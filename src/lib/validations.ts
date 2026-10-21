@@ -248,6 +248,14 @@ export const updateSettingsSchema = z.object({
     newPassword: z.string().min(6, 'Mínimo 6 caracteres').max(100),
   })
 
+  // ─── Forgot Password (direct restaurant user recovery) ─────
+
+  export const forgotPasswordSchema = z.object({
+    restaurantSlug: z.string().min(1, 'El slug o código del restaurante es obligatorio').max(50),
+    username: z.string().min(1, 'El nombre de usuario es obligatorio').max(50),
+    newPassword: z.string().min(6, 'La nueva contraseña debe tener al menos 6 caracteres').max(100),
+  })
+
   // ─── Onboarding ────────────────────────────────────────────
 
   export const onboardingSchema = z.object({
