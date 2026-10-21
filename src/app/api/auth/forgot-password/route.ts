@@ -105,13 +105,14 @@ export async function POST(request: Request) {
     await createAuditLog({
       restaurantId: restaurant.id,
       userId: targetUser.id,
-      action: 'forgot_password_reset',
+      action: 'password_reset',
       entityType: 'user',
       entityId: targetUser.id,
       details: {
         username: targetUser.username,
         role: targetUser.role,
         restaurantSlug: normalizedSlug,
+        reason: 'forgot_password',
       },
       ipAddress,
     })
