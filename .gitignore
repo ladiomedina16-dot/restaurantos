@@ -87,3 +87,6 @@ start.sh
 
 # Prisma engine binaries (platform-specific)
 prisma/engine*
+
+.vercel
+.env*
