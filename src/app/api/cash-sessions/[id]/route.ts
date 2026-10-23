@@ -86,11 +86,12 @@ export async function PUT(
 
     const { closingCash } = validation.data
 
-    // Fetch the cash session with payments
+    // Fetch the cash session with payments and supplier payments
     const cashSession = await db.cashSession.findFirst({
       where: { id, restaurantId },
       include: {
         payments: true,
+        supplierPayments: true,
       },
     })
 
@@ -108,7 +109,7 @@ export async function PUT(
       )
     }
 
-    // Calculate totals from linked payments
+    // Calculate totals from linked payments and supplier payments
     const totalSales = cashSession.payments.reduce((sum, p) => sum + p.amount, 0)
     const totalCard = cashSession.payments
       .filter((p) => p.method === 'tarjeta')
@@ -116,9 +117,13 @@ export async function PUT(
     const totalCash = cashSession.payments
       .filter((p) => p.method === 'efectivo')
       .reduce((sum, p) => sum + p.amount, 0)
+    const totalSuppliers = (cashSession.supplierPayments || []).reduce(
+      (sum, sp) => sum + sp.amount,
+      0
+    )
 
-    // Calculate expected and difference
-    const expectedCash = cashSession.openingCash + totalCash
+    // Calculate expected and difference (accounting for supplier payouts)
+    const expectedCash = cashSession.openingCash + totalCash - totalSuppliers
     const difference = closingCash - expectedCash
 
     // Close the session
@@ -130,6 +135,7 @@ export async function PUT(
         totalSales,
         totalCard,
         totalCash,
+        totalSuppliers,
         difference,
         closedById: user.userId,
         closedAt: new Date(),
@@ -167,9 +173,10 @@ export async function PUT(
         totalSales,
         totalCard,
         totalCash,
+        totalSuppliers,
         closedBy: user.username,
       },
-      ipAddress: request.headers.get('x-forwarded-for') ?? undefined,
+      ipAddress: request.headers.get('x-forwarded-for')?.split(',')[0].trim() || request.headers.get('x-real-ip') || undefined,
     })
 
     return Response.json({ cashSession: closedSession })

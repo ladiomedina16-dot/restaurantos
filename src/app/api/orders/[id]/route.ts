@@ -218,56 +218,12 @@ export async function PUT(
       return NextResponse.json({ order })
     }
 
-    // When status changes to "paid", potentially free the table
-    if (status === 'paid' && existing.status !== 'paid') {
-      const order = await db.$transaction(async (tx) => {
-        const updateData: Record<string, unknown> = {}
-        if (status !== undefined) updateData.status = status
-        if (notes !== undefined) updateData.notes = notes
-
-        const updatedOrder = await tx.order.update({
-          where: { id },
-          data: updateData,
-          include: orderInclude,
-        })
-
-        // Check if table has other active (non-paid, non-cancelled) orders (scoped to restaurant)
-        const activeOrdersCount = await tx.order.count({
-          where: {
-            tableId: existing.tableId,
-            restaurantId,
-            status: { notIn: ['paid', 'cancelled'] },
-            id: { not: id },
-          },
-        })
-
-        if (activeOrdersCount === 0) {
-          await tx.table.update({
-            where: { id: existing.tableId },
-            data: { status: 'available' },
-          })
-        }
-
-        return updatedOrder
-      })
-
-      // Emit real-time status change
-      await emitOrderStatusChanged(order)
-
-      // Audit log
-      await createAuditLog({
-        restaurantId,
-        userId: user.userId,
-        action: 'order_status_changed',
-        entityType: 'order',
-        entityId: id,
-        details: {
-          from: existing.status,
-          to: 'paid',
-        },
-      })
-
-      return NextResponse.json({ order })
+    // Block direct transition to "paid" via generic PUT (must use /api/orders/[id]/pay)
+    if (status === 'paid') {
+      return NextResponse.json(
+        { error: 'Para cobrar un pedido use el endpoint específico de cobro /api/orders/[id]/pay.' },
+        { status: 400 }
+      )
     }
 
     // Standard update for other status changes

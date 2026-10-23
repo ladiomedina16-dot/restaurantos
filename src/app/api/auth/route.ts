@@ -26,7 +26,11 @@ import { createAuditLog } from '@/lib/audit'
 // ─── Helper: get client IP ──────────────────────────────────
 
 function getClientIp(request: Request): string {
-  return request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || 'unknown'
+  const forwarded = request.headers.get('x-forwarded-for')
+  if (forwarded) {
+    return forwarded.split(',')[0].trim()
+  }
+  return request.headers.get('x-real-ip') || 'unknown'
 }
 
 // ─── POST /api/auth (login / refresh) ──────────────────────

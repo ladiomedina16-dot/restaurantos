@@ -477,110 +477,37 @@ export default function RestaurantPage() {
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2 text-amber-800">
                 <KeyRound className="size-5 text-amber-600" />
-                Recuperar Contraseña
+                Recuperación de Contraseña
               </DialogTitle>
               <DialogDescription>
-                Introduce el slug del restaurante, tu usuario y la nueva clave para restablecerla.
+                Información de seguridad para usuarios del sistema
               </DialogDescription>
             </DialogHeader>
 
-            <form onSubmit={handleForgotPassword} className="space-y-4 pt-2">
-              <div className="space-y-2">
-                <Label htmlFor="forgot-slug">Slug o Código del Restaurante *</Label>
-                <Input
-                  id="forgot-slug"
-                  placeholder="ej: la-sevillana o la-bartola"
-                  value={forgotSlug}
-                  onChange={(e) => setForgotSlug(e.target.value.toLowerCase().replace(/\s+/g, '-'))}
-                  required
-                />
-                <p className="text-[11px] text-muted-foreground">
-                  Identificador del restaurante (ej: la-sevillana)
+            <div className="space-y-4 pt-2">
+              <div className="rounded-lg bg-amber-50 border border-amber-200 p-4 text-sm text-amber-900 space-y-2">
+                <p className="font-semibold flex items-center gap-2">
+                  <AlertTriangle className="size-4 text-amber-700" />
+                  Política de Seguridad
+                </p>
+                <p>
+                  Por motivos de seguridad y prevención de accesos no autorizados, los restablecimientos de contraseña deben ser gestionados directamente por el <strong>administrador de su restaurante</strong> desde el panel de gestión de usuarios.
+                </p>
+                <p className="text-xs text-amber-800">
+                  Si usted es el administrador o necesita soporte urgente, contacte con el soporte técnico de la plataforma.
                 </p>
               </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="forgot-username">Nombre de Usuario *</Label>
-                <Input
-                  id="forgot-username"
-                  placeholder="ej: roberto carlos o admin"
-                  value={forgotUsername}
-                  onChange={(e) => setForgotUsername(e.target.value)}
-                  required
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="forgot-new-password">Nueva Contraseña *</Label>
-                <div className="relative">
-                  <Input
-                    id="forgot-new-password"
-                    type={forgotShowNew ? 'text' : 'password'}
-                    placeholder="Mínimo 6 caracteres"
-                    value={forgotNewPassword}
-                    onChange={(e) => setForgotNewPassword(e.target.value)}
-                    className="pr-10"
-                    required
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setForgotShowNew(!forgotShowNew)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground cursor-pointer"
-                  >
-                    {forgotShowNew ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
-                  </button>
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="forgot-confirm-password">Confirmar Nueva Contraseña *</Label>
-                <div className="relative">
-                  <Input
-                    id="forgot-confirm-password"
-                    type={forgotShowConfirm ? 'text' : 'password'}
-                    placeholder="Repite la nueva contraseña"
-                    value={forgotConfirmPassword}
-                    onChange={(e) => setForgotConfirmPassword(e.target.value)}
-                    className="pr-10"
-                    required
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setForgotShowConfirm(!forgotShowConfirm)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground cursor-pointer"
-                  >
-                    {forgotShowConfirm ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
-                  </button>
-                </div>
-              </div>
-
-              {forgotError && (
-                <p className="text-sm text-red-600 text-center">{forgotError}</p>
-              )}
-
-              {forgotSuccess && (
-                <p className="text-sm text-green-600 text-center font-medium">
-                  ✅ {forgotSuccess}
-                </p>
-              )}
-
-              <DialogFooter className="gap-2 sm:gap-0 pt-2">
+              <DialogFooter className="pt-2">
                 <Button
                   type="button"
-                  variant="outline"
+                  className="w-full bg-amber-600 hover:bg-amber-700 text-white"
                   onClick={() => setShowForgotPasswordDialog(false)}
                 >
-                  Cancelar
-                </Button>
-                <Button
-                  type="submit"
-                  className="bg-amber-600 hover:bg-amber-700 text-white"
-                  disabled={forgotLoading || !!forgotSuccess}
-                >
-                  {forgotLoading ? 'Restableciendo...' : 'Restablecer Contraseña'}
+                  Entendido
                 </Button>
               </DialogFooter>
-            </form>
+            </div>
           </DialogContent>
         </Dialog>
       </div>

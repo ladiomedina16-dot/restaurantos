@@ -7,7 +7,7 @@
 
 import { db } from '@/lib/db'
 import { NextResponse } from 'next/server'
-import { authenticateAndAuthorize, requireRestaurantScope, requireActiveSubscription, getZoneFilter } from '@/lib/auth'
+import { authenticateAndAuthorize, requireRestaurantScope, requireActiveSubscription, requireOpenCashSession, getZoneFilter } from '@/lib/auth'
 import { validateInput, createOrderSchema } from '@/lib/validations'
 import { createAuditLog } from '@/lib/audit'
 import { handleApiError } from '@/lib/errors'
@@ -104,6 +104,10 @@ export async function POST(request: Request) {
   // SaaS Subscription Guard: block order creation if restaurant is suspended
   const subCheck = await requireActiveSubscription(restaurantId, user.role)
   if ('error' in subCheck) return subCheck.error
+
+  // Cash Session Guard: block order creation when caja is closed
+  const cashCheck = await requireOpenCashSession(restaurantId)
+  if ('error' in cashCheck) return cashCheck.error
 
   try {
     const body = await request.json()

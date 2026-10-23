@@ -1,17 +1,18 @@
 // ============================================================
 // /api/auth/forgot-password — Recuperación de contraseña
-// Permite a administradores y trabajadores de un restaurante
-// restablecer su contraseña especificando el slug del restaurante,
-// su usuario y la nueva contraseña.
-// ⚠️ Protege explícitamente al super_admin (nunca modificable por aquí).
+// ⚠️ SEGURIDAD CRÍTICA (CWE-640):
+// Sin canal externo de verificación de identidad (email transaccional,
+// SMS o token OTP de un solo uso con caducidad), permitir el cambio de
+// contraseña conociendo únicamente el slug y el nombre de usuario
+// constituye un vector de secuestro de cuenta (Account Takeover).
+// Este endpoint bloquea la modificación desatendida y redirige al flujo
+// seguro administrado por el administrador del restaurante.
 // ============================================================
 
 import { db } from '@/lib/db'
 import { NextResponse } from 'next/server'
-import { hashPassword } from '@/lib/auth'
 import { validateInput, forgotPasswordSchema } from '@/lib/validations'
 import { handleApiError } from '@/lib/errors'
-import { createAuditLog } from '@/lib/audit'
 
 export async function POST(request: Request) {
   try {
@@ -21,7 +22,7 @@ export async function POST(request: Request) {
     const validation = validateInput(forgotPasswordSchema, body)
     if (!validation.success) return validation.error
 
-    const { restaurantSlug, username, newPassword } = validation.data
+    const { restaurantSlug, username } = validation.data
     const normalizedSlug = restaurantSlug.trim().toLowerCase()
     const normalizedUsername = username.trim()
 
@@ -88,39 +89,15 @@ export async function POST(request: Request) {
       )
     }
 
-    // 4. Generar nuevo hash con bcrypt
-    const passwordHash = await hashPassword(newPassword)
-
-    // 5. Actualizar contraseña
-    await db.user.update({
-      where: { id: targetUser.id },
-      data: {
-        passwordHash,
-        mustChangePassword: false,
+    // 4. BLOQUEO DE SEGURIDAD (CWE-640):
+    // Sin canal externo de verificación de identidad, se bloquea el reseteo desatendido.
+    return NextResponse.json(
+      {
+        error:
+          'El restablecimiento desatendido de contraseñas está deshabilitado por motivos de seguridad. Por favor, solicita al administrador de tu restaurante que restablezca tu acceso desde el panel de gestión de usuarios.',
       },
-    })
-
-    // 6. Auditoría
-    const ipAddress = request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || 'unknown'
-    await createAuditLog({
-      restaurantId: restaurant.id,
-      userId: targetUser.id,
-      action: 'password_reset',
-      entityType: 'user',
-      entityId: targetUser.id,
-      details: {
-        username: targetUser.username,
-        role: targetUser.role,
-        restaurantSlug: normalizedSlug,
-        reason: 'forgot_password',
-      },
-      ipAddress,
-    })
-
-    return NextResponse.json({
-      success: true,
-      message: 'Contraseña actualizada correctamente. Ya puedes iniciar sesión con tu nueva contraseña.',
-    })
+      { status: 403 }
+    )
   } catch (error) {
     return handleApiError('Forgot Password Reset', error)
   }

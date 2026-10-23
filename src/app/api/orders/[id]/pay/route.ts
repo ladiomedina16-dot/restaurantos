@@ -102,15 +102,28 @@ export async function POST(
 
     // ─── Transacción atómica ───────────────────────
     const result = await db.$transaction(async (tx) => {
-      // Actualizar pedido: discount, total, status = paid
-      const updatedOrder = await tx.order.update({
-        where: { id },
+      // 1. Actualización condicional atómica para prevenir Race Conditions (CWE-362)
+      // Solo actualiza si el pedido aún no está pagado ni cancelado
+      const updateResult = await tx.order.updateMany({
+        where: {
+          id,
+          restaurantId,
+          status: { notIn: ['paid', 'cancelled'] },
+        },
         data: {
           status: 'paid',
           subtotal,
           discount,
           total: totalAfterDiscount,
         },
+      })
+
+      if (updateResult.count === 0) {
+        throw new Error('ORDER_ALREADY_PAID_OR_CANCELLED')
+      }
+
+      const updatedOrder = await tx.order.findUniqueOrThrow({
+        where: { id },
         include: {
           items: { include: { product: true } },
           table: true,
@@ -204,6 +217,12 @@ export async function POST(
       },
     })
   } catch (error) {
+    if (error instanceof Error && error.message === 'ORDER_ALREADY_PAID_OR_CANCELLED') {
+      return NextResponse.json(
+        { error: 'Este pedido ya ha sido cobrado o cancelado previamente.' },
+        { status: 409 }
+      )
+    }
     return handleApiError('Order pay', error)
   }
 }

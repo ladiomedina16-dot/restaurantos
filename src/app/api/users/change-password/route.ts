@@ -73,16 +73,17 @@ export async function POST(request: Request) {
       },
     })
 
-    // Audit log
-    const auditRestaurantId = dbUser.restaurantId ?? 'unknown'
-    await createAuditLog({
-      restaurantId: auditRestaurantId,
-      userId: user.userId,
-      action: 'password_changed',
-      entityType: 'user',
-      entityId: user.userId,
-      ipAddress: request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || '',
-    })
+    // Audit log (only if user belongs to a restaurant, avoiding foreign key constraint failure for super_admin)
+    if (dbUser.restaurantId) {
+      await createAuditLog({
+        restaurantId: dbUser.restaurantId,
+        userId: user.userId,
+        action: 'password_changed',
+        entityType: 'user',
+        entityId: user.userId,
+        ipAddress: request.headers.get('x-forwarded-for')?.split(',')[0].trim() || request.headers.get('x-real-ip') || '',
+      })
+    }
 
     return NextResponse.json({ success: true, message: 'Contraseña actualizada correctamente.' })
   } catch (error) {
